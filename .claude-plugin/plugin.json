@@ -3,7 +3,7 @@
   "displayName": "Plan Runner",
   "homepage": "https://github.com/MisterVitoPro/plan-runner",
   "description": "Take a Markdown implementation plan, run it through a parallel agent swarm with per-wave verification, and generate a bug-fix plan for re-runs; TDD red-green mode on by default (--no-tdd to disable) with per-task red/green gate evidence; auto-detects Claude Code Agent Teams for token-lean orchestration with a subagent fallback. Tallies best-effort token usage for every dispatched subagent (analyzer, dev agents, verifiers, aggregator) into manifest.json token_usage with a grand total and honest coverage counters, surfaced in dashboards, an end-of-run per-phase Token Report with top consumers, and the PR stats. On the teams backend each wave is verifier-gated: the lead waits on the verifier's actual task result (never self-verifies) and a coverage gate before aggregation backfills any missing verdict, so a PR cannot open while a verifier is still outstanding. git is optional: when absent (no binary or not a repo) all git operations are skipped. Before opening the PR, syncs a code-atlas architecture index (runs /code-atlas:update when .code-atlas/ is present) so the index reflects what was implemented. Final step opens or updates a proper PR via the plan-runner:pr skill (conventional title, rich body, draft when bugs remain).",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "license": "MIT",
   "keywords": [
     "agent-orchestration",

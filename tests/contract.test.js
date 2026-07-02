@@ -130,7 +130,7 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.7.0", "plugin version is current");
+  assert.equal(pkg.version, "1.8.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
@@ -153,6 +153,46 @@ test("SKILL tears down dev agents and the wave verifier after every wave (no idl
   assert.ok(
     f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Dispatch wave verifier"),
     "dev-agent teardown must happen before the wave verifier is dispatched"
+  );
+});
+
+test("SKILL guards against rogue dev-agent self-commits", () => {
+  const f = read("skills/run/SKILL.md");
+  // a wave-start SHA is recorded so rogue commits are detectable, gated on git
+  assert.match(f, /wave_start_sha/, "must record a wave-start SHA");
+  assert.match(
+    f,
+    /git_available[\s\S]{0,200}wave_start_sha|wave_start_sha[\s\S]{0,200}git_available/i,
+    "wave-start SHA capture must be gated on git availability"
+  );
+  // a named guard section exists
+  assert.match(f, /Rogue-commit guard/, "must define a rogue-commit guard");
+  // detection: commits since the wave-start SHA scoped to the agent's owned files
+  assert.match(
+    f,
+    /git log[^\n]*wave_start_sha[^\n]*\.\.HEAD/,
+    "guard must check commits since the wave-start SHA"
+  );
+  // a rogue self-commit counts as delivered work -- never a reason to dispatch a retry agent
+  assert.match(
+    f,
+    /rogue[\s\S]{0,400}(do NOT dispatch a retry|counts as delivered)/i,
+    "a rogue self-commit must not trigger a retry agent"
+  );
+  // 4e: a clean tree with rogue commits is NOT "nothing to commit"
+  assert.match(
+    f,
+    /nothing to commit[\s\S]{0,700}rogue|rogue[\s\S]{0,700}nothing to commit/i,
+    "the no-changes branch of the wave commit must consider rogue commits"
+  );
+});
+
+test("plan-dev explicitly forbids git writes", () => {
+  const f = read("agents/plan-dev.md");
+  assert.match(
+    f,
+    /NEVER run `?git (add|commit|push)/i,
+    "plan-dev must name the forbidden git commands, not just say 'do not commit'"
   );
 });
 

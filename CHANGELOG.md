@@ -2,6 +2,11 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.8.0 - 2026-07-02
+
+- **Rogue-commit guard.** A dev agent that disobeys the no-commit rule and commits its own work leaves a clean working tree, which the orchestrator previously misread as "agent produced nothing" -- triggering a wasted retry agent, and mislabeling the wave commit as "no changes". The run skill now records `wave_start_sha` at the start of every wave (when git is available) and, before treating any dev agent as silent-failed or dispatching a retry, checks `git log <wave_start_sha>..HEAD -- <owned_files>`; self-committed work counts as delivered and flows to the wave verifier as usual. The wave-commit step (4e) likewise distinguishes a genuinely empty wave from one self-committed by agents (`skipped_reason = "self-committed by dev agents (rogue)"`, with the real HEAD recorded as `commit_sha`). All checks are gated on `git_available`.
+- **Sharper plan-dev git prohibition.** The dev-agent rule now names the forbidden commands (`git add` / `git commit` / `git push`) and explains why a self-commit is harmful, instead of the softer "Do NOT commit".
+
 ## 1.7.0 - 2026-07-02
 
 - **Agent teardown (no more idle agents).** A finished dev agent or wave verifier does not exit on its own -- it stayed resident as an idle background task (subagent backend) or idle teammate (teams backend) until the whole cycle ended. Every wave now explicitly calls `TaskStop` on each dev agent immediately after its result is captured (before the wave verifier is dispatched) and on the wave verifier immediately after its report is captured, regardless of status/verdict. This runs wave by wave, so agents from wave 1 no longer idle for the rest of a multi-wave run.
