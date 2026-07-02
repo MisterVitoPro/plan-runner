@@ -1,6 +1,6 @@
 # plan-runner
 
-![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fqa-claude-market%2Fmain%2Fplugins%2Fplan-runner%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)
+![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)
 
 Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning.
 
@@ -15,7 +15,8 @@ Take a free-form Markdown implementation plan and execute it through a parallel 
 ## Install
 
 ```bash
-claude plugin marketplace add MisterVitoPro/qa-swarm --plugin plan-runner
+claude plugin marketplace add MisterVitoPro/qa-claude-market
+claude plugin install plan-runner@mistervitopro-plugin-marketplace
 ```
 
 ## Usage
@@ -68,7 +69,15 @@ plan-runner tallies the tokens consumed by every subagent it dispatches -- the
 analyzer, every dev agent, each wave verifier, and the aggregator -- so you can
 see what a cycle cost. The tally is written to `manifest.json` under
 `token_usage` (a per-agent `by_agent` breakdown plus a `total_tokens` grand
-total) and surfaced in the wave dashboards, the final summary, and the PR stats.
+total) and surfaced in the wave dashboards, the end-of-run Token Report, and the
+PR stats.
+
+At the end of every run (both the clean path and the bugs-found path) plan-runner
+prints a **Token Report**: a per-phase table (Analyze / Dev / Verify / Aggregate)
+with input, output, and total sums, a per-phase reported-coverage column, a
+top-consumers line naming the most expensive subagents, and a grand total with an
+honest coverage line. The PR body carries a compact per-phase breakdown under its
+`Tokens:` stat.
 
 Capture is **best-effort**: there is no tool that returns a subagent's token
 count, so plan-runner records the usage figure the harness surfaces when each
@@ -167,10 +176,6 @@ docs/plan-runner/{DATE}/cycle-{N}/
 ## Auto-Setup
 
 On first session start, a hook automatically adds `docs/plan-runner/` to `.gitignore` (if a `.gitignore` exists). Generated output is not committed and remains local to the working tree.
-
-## Design
-
-Full design spec at `docs/superpowers/specs/2026-04-15-plan-runner-design.md` (in the source repo).
 
 ## License
 

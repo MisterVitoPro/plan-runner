@@ -1,5 +1,5 @@
 {
-  "description": "plan-runner SessionStart hook: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed.",
+  "description": "plan-runner SessionStart hook: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed. The logic is inlined via node -e (no file paths, no ${CLAUDE_PLUGIN_ROOT}) so it works even on builds where the plugin-root variable is not substituted for SessionStart hooks.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-gitignore.js\"",
+            "command": "node -e \"const fs=require('fs');try{const p='.gitignore',e='docs/plan-runner/';if(fs.existsSync(p)){const c=fs.readFileSync(p,'utf8');if(!c.split(/\\r?\\n/).some(l=>l.trim()===e)){fs.appendFileSync(p,(c.length>0&&!c.endsWith('\\n')?'\\n':'')+e+'\\n')}}}catch(err){}\"",
             "timeout": 5
           }
         ]

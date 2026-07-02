@@ -130,7 +130,7 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.5.0", "plugin version is current");
+  assert.equal(pkg.version, "1.6.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
@@ -220,6 +220,22 @@ test("pr skill surfaces token totals in stats", () => {
   const f = read("skills/pr/SKILL.md");
   assert.match(f, /token_usage/, "pr skill reads token_usage from the manifest");
   assert.match(f, /Tokens:.{0,80}subagents/, "pr stats include a Tokens line");
+  assert.match(f, /By phase:.{0,80}(analyze|dev|verify|aggregate)/i, "pr stats include a per-phase breakdown");
+});
+
+test("run skill renders an end-of-run Token Report", () => {
+  const f = read("skills/run/SKILL.md");
+  // a rendering spec exists under the Token accounting section
+  assert.match(f, /### End-of-run Token Report/, "must define the Token Report rendering spec");
+  assert.match(f, /Top consumers/, "report lists top-consuming subagents");
+  assert.match(f, /Coverage:/, "report carries an honest coverage line");
+  assert.match(f, /lower bound/i, "partial coverage is described as a lower bound");
+  assert.match(f, /Omit a phase row/i, "phases with no dispatched agents are omitted, not zero-filled");
+  // both end-of-run paths print it: Step 6 (bugs) and Step 7 (clean)
+  const refs = f.match(/rendered per the "End-of-run Token Report" spec/g) || [];
+  assert.ok(refs.length >= 2, "both Step 6 and Step 7 must print the Token Report block");
+  // honesty invariant: sums cover non-null values only
+  assert.match(f, /non-null.{0,40}values only|sums of the \*\*non-null\*\* values/i, "sums must skip null entries");
 });
 
 test("README documents token accounting", () => {
@@ -227,6 +243,26 @@ test("README documents token accounting", () => {
   assert.match(readme, /## Token accounting/, "README has a token accounting section");
   assert.match(readme, /token_usage/, "README references the manifest token_usage field");
   assert.match(readme, /best-effort/i, "README is honest that capture is best-effort");
+});
+
+test("read-only pipeline agents declare least-privilege tools", () => {
+  // verifier and analyzer must not carry write tools; aggregator writes only via Write
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /^tools:\s*Read,\s*Grep,\s*Glob\s*$/m, "verifier is read-only");
+  const analyzer = read("agents/plan-analyzer.md");
+  assert.match(analyzer, /^tools:\s*Read,\s*Grep,\s*Glob\s*$/m, "analyzer is read-only");
+  const aggregator = read("agents/plan-aggregator.md");
+  assert.match(aggregator, /^tools:\s*Read,\s*Grep,\s*Glob,\s*Write\s*$/m, "aggregator gets Write but nothing broader");
+});
+
+test("SessionStart hook is self-contained (no CLAUDE_PLUGIN_ROOT, no script paths)", () => {
+  const hooks = JSON.parse(read("hooks/hooks.json"));
+  const cmd = hooks.hooks.SessionStart[0].hooks[0].command;
+  assert.doesNotMatch(cmd, /CLAUDE_PLUGIN_ROOT/, "hook must not rely on plugin-root substitution");
+  assert.match(cmd, /^node -e /, "hook logic is inlined via node -e");
+  assert.match(cmd, /docs\/plan-runner\//, "hook targets the docs/plan-runner/ gitignore entry");
+  assert.ok(!exists("scripts/ensure-gitignore.js"), "the old script file must be gone");
+  assert.ok(hooks.hooks.SessionStart[0].hooks[0].timeout <= 10, "hook keeps a short timeout");
 });
 
 test("docs cover the Agent Teams backend", () => {

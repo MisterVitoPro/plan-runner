@@ -56,6 +56,34 @@ Maintain a running `token_usage` tally in memory across the whole cycle and writ
 
 Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), every dev agent (Step 4a), every wave verifier (Step 4b), and the aggregator (Step 5). `agent` is the subagent label (`analyzer`, `wave-<W>-agent-<n>`, `wave-<W>-verifier`, `aggregator`); `phase` is one of `analyze | wave | verify | aggregate`.
 
+### End-of-run Token Report
+
+Both end-of-run paths -- the Step 6 bug report and the Step 7 final summary -- print a full **Token Report** rendered from the finalized `token_usage`:
+
+```
+Token Report
+============================================================
+ Phase     | Agents | Reported | Input    | Output   | Total
+-----------|--------|----------|----------|----------|----------
+ Analyze   |      1 |      1/1 |   12,345 |    2,345 |   14,690
+ Dev       |      8 |      7/8 |  201,558 |   40,120 |  241,678
+ Verify    |      3 |      3/3 |   88,410 |   12,077 |  100,487
+ Aggregate |      1 |      1/1 |   20,115 |    4,882 |   24,997
+-----------|--------|----------|----------|----------|----------
+ Total     |     13 |    12/13 |  322,428 |   59,424 |  381,852
+
+Top consumers: wave-2-agent-1 (64,201), wave-1-verifier (41,388), analyzer (14,690)
+Coverage: 12/13 subagents reported usage -- totals are a lower bound (partial)
+```
+
+Rendering rules:
+- Group `by_agent` entries by `phase`: `analyze` -> Analyze, `wave` -> Dev, `verify` -> Verify, `aggregate` -> Aggregate. Omit a phase row entirely when no subagent was dispatched in that phase (e.g. Aggregate on a zero-bug run).
+- `Agents` = subagents dispatched in the phase; `Reported` = how many surfaced a usage figure.
+- Input / Output / Total columns are sums of the **non-null** values only, with thousands separators. Print `n/a` for a cell where nothing in that phase reported a figure. Never fabricate a number.
+- `Top consumers` lists up to 3 agents with the largest non-null `total`, formatted `<agent> (<total>)`. Omit the line when no agent reported.
+- The Coverage line prints `Coverage: <N>/<N> subagents reported usage -- complete` when every subagent reported; otherwise the lower-bound wording shown above.
+- The `Total` row's Total cell equals `token_usage.total_tokens`.
+
 ## Step 1: PRE-FLIGHT
 
 Record the pipeline start time: `t_start = $(date +%s)`.
@@ -282,7 +310,7 @@ When the agent returns, parse the JSON. If parsing fails:
 - If second attempt also fails, print the agent's raw output and STOP.
 
 Validate the wave plan:
-1. Conforms to `plugins/plan-runner/schemas/wave-plan.schema.json` (use Python+jsonschema if available; otherwise structural check: required fields present, agent counts <=6, file paths unique within each wave). Note that `rationale` and `complexity_signals` are optional -- do NOT fail validation if they are absent.
+1. Conforms to the plugin's `schemas/wave-plan.schema.json` (under the plugin root, i.e. `${CLAUDE_PLUGIN_ROOT}/schemas/wave-plan.schema.json`; use Python+jsonschema if available; otherwise structural check: required fields present, agent counts <=6, file paths unique within each wave). Note that `rationale` and `complexity_signals` are optional -- do NOT fail validation if they are absent.
 2. Within each wave, the union of `owned_files` across all agents has no duplicates.
 3. Every agent has a `task_excerpt_lines` matching `^[0-9]+-[0-9]+$` where START <= END and END <= total lines in the plan file.
 
@@ -638,11 +666,11 @@ Print the bug summary:
 P0: <N>   P1: <N>   P2: <N>   P3: <N>
 Total: <N> bugs across <W> waves
 
-Tokens:        <total_tokens> across <agents_reported>/<agents_total> subagents<if not complete: " (partial -- some subagents did not report usage)">
-
 Bug report:    <bugs.md path>
 Fix plan:      <fix-plan.md path>
 ```
+
+Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
 
 If cycle_n > 1, add a convergence hint:
 ```
@@ -701,6 +729,8 @@ Tokens: <total_tokens> across <agents_reported>/<agents_total> subagents<if not 
 
 Manifest: <path to manifest.json>
 ```
+
+Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
 
 Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 

@@ -6,6 +6,7 @@ description: >
   generates a free-form Markdown fix-plan.md that is valid input for a re-run of /plan-runner:run.
 model: haiku
 color: red
+tools: Read, Grep, Glob, Write
 ---
 
 You are the Aggregator Agent in the plan-runner pipeline. You produce two final artifacts: `bugs.md` (audit) and `fix-plan.md` (next-cycle input).

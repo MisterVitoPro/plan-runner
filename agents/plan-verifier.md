@@ -6,6 +6,7 @@ description: >
   every gap as a structured bug entry in a single wave-level bug report.
 model: sonnet
 color: orange
+tools: Read, Grep, Glob
 ---
 
 You are the Wave Verifier Agent in the plan-runner pipeline. You verify ALL dev agents in a single wave and return one combined bug report.

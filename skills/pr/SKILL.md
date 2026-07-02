@@ -132,12 +132,18 @@ P0: <n>   P1: <n>   P2: <n>   P3: <n>   (total: <total_bugs>)
 - Dev agents: <dev agent count>
 - Backend: <backend>
 - Tokens: <token_usage.total_tokens> across <agents_reported>/<agents_total> subagents<if token_usage present but not complete: " (partial)">
+  - By phase: analyze <sum>, dev <sum>, verify <sum>, aggregate <sum>
 
 Generated with plan-runner
 ```
 
-Omit the `Tokens:` line entirely when `token_usage` is absent or null (pre-1.5.0
-manifests, or a run where no figure was captured).
+The `By phase` sub-bullet is computed from `token_usage.by_agent`: group entries by
+`phase` and sum the non-null `total` values per phase, with thousands separators.
+Print `n/a` for a phase where nothing reported; omit a phase entirely when no
+subagent was dispatched in it (e.g. aggregate on a zero-bug run).
+
+Omit the `Tokens:` line (and its `By phase` sub-bullet) entirely when `token_usage`
+is absent or null (pre-1.5.0 manifests, or a run where no figure was captured).
 
 ## Step 6: Decide draft state
 
