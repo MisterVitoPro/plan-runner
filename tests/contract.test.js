@@ -1,0 +1,236 @@
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
+
+test("plan-test-author agent exists and only writes failing tests", () => {
+  assert.ok(exists("agents/plan-test-author.md"), "agents/plan-test-author.md must exist");
+  const f = read("agents/plan-test-author.md");
+  assert.match(f, /name:\s*plan-test-author/, "frontmatter name");
+  assert.match(f, /failing test/i, "must describe writing a failing test");
+  assert.match(f, /do not.{0,20}implement|never.{0,20}implement|not (write|implement).{0,40}implementation/i, "must forbid writing implementation");
+  assert.match(f, /test_files/, "must return test_files");
+});
+
+test("plan-analyzer classifies testable tasks and splits them in TDD mode", () => {
+  const f = read("agents/plan-analyzer.md");
+  assert.match(f, /tdd_enabled/, "must read a tdd_enabled flag");
+  assert.match(f, /testable/i, "must classify tasks testable vs non-testable");
+  assert.match(f, /non_testable_reason/, "must record a reason for non-testable tasks");
+  assert.match(f, /test-author/i, "must emit a test-author node");
+  assert.match(f, /tests_to_satisfy/, "impl node must point at the paired tests");
+  assert.match(f, /already exist/i, "re-run: detect pre-existing tests -> impl-only");
+});
+
+test("plan-verifier supports red-gate and green-gate modes", () => {
+  const f = read("agents/plan-verifier.md");
+  assert.match(f, /red-gate/i, "must define red-gate behavior");
+  assert.match(f, /green-gate/i, "must define green-gate behavior");
+  assert.match(f, /valid_red|valid red/i, "must judge whether red is valid");
+  assert.match(f, /syntax|collection/i, "syntax/collection error = invalid red");
+  assert.match(f, /broken_existing/, "must flag broken pre-existing tests");
+  assert.match(f, /captured_test_output|test-run output/i, "consumes orchestrator-captured test output");
+});
+
+test("plan-dev consumes tests_to_satisfy and is gated on green", () => {
+  const f = read("agents/plan-dev.md");
+  assert.match(f, /tests_to_satisfy/, "impl must be told which tests to satisfy");
+  assert.match(f, /green gate|make.{0,30}tests pass/i, "impl must aim to make the tests pass");
+});
+
+test("SKILL pre-flight handles --no-tdd, prompts, resolves test cmd, stops if none", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /--no-tdd/, "must document the --no-tdd flag");
+  assert.match(f, /auto-enabled|on by default|enabled.{0,20}default/i, "TDD is auto-enabled by default (no prompt)");
+  assert.match(f, /--test-cmd/, "must support a --test-cmd flag");
+  assert.match(f, /package\.json|pytest|go\.mod|Cargo\.toml|csproj/i, "must list detection markers");
+  assert.match(f, /baseline/i, "must capture a green baseline");
+  assert.match(f, /\{file\}/, "must store a single-file invocation pattern");
+  assert.match(f, /STOP[\s\S]{0,200}--no-tdd/, "must STOP (not downgrade) when no test cmd is resolved");
+});
+
+test("SKILL passes tdd flags to analyzer and shows roles in the wave plan", () => {
+  const f = read("skills/run/SKILL.md");
+  // analyzer dispatch block must forward the tdd flag + test command
+  assert.match(f, /TDD enabled:\s*<tdd_enabled>|tdd_enabled:\s*<tdd_enabled>/, "analyzer prompt forwards tdd_enabled");
+  assert.match(f, /Test command:\s*<.*single.*>|test_command/i, "analyzer prompt forwards the test command");
+  // display must surface role / testability
+  assert.match(f, /\[test\]|\[impl\]|role|testable|non-testable/i, "wave-plan display must surface roles/testability");
+});
+
+test("SKILL runs per-agent red/green gates, routes bugs, records evidence", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /Red gate/i, "red gate step");
+  assert.match(f, /Green gate/i, "green gate step");
+  assert.match(f, /per agent|per-agent/i, "gates applied per agent within a wave");
+  assert.match(f, /invalid red[\s\S]{0,160}(BLOCKED|skip)/i, "invalid red blocks/skips the paired impl");
+  assert.match(f, /No inline retries|no retries|without retr/i, "explicitly no inline retries");
+  assert.match(f, /tdd\.tasks|red_run|green_run/i, "writes red/green evidence to the manifest");
+});
+
+test("SKILL Step 4a dispatches agents by role (test-author vs impl)", () => {
+  const f = read("skills/run/SKILL.md");
+  // the test-author agent must be dispatched by registered subagent type (not inlined)
+  assert.match(f, /plan-runner:plan-test-author/, "Step 4 must dispatch the plan-test-author agent by subagent type for test-author roles");
+  // dispatch must branch on role
+  assert.match(f, /role.{0,40}(test-author|impl)/is, "dispatch must select the agent by role");
+  // impl agents must be told which tests to satisfy at dispatch time
+  assert.match(f, /TESTS TO SATISFY|forward.{0,30}tests_to_satisfy|tests_to_satisfy.{0,40}(prompt|dispatch|impl agent)/is, "impl dispatch must forward tests_to_satisfy");
+});
+
+test("SKILL dispatches pipeline agents by registered subagent type (no inlining)", () => {
+  const f = read("skills/run/SKILL.md");
+  // all five pipeline agents are referenced by type, keeping prompts token-lean
+  for (const t of [
+    "plan-runner:plan-analyzer",
+    "plan-runner:plan-dev",
+    "plan-runner:plan-test-author",
+    "plan-runner:plan-verifier",
+    "plan-runner:plan-aggregator",
+  ]) {
+    assert.match(f, new RegExp(t), `must dispatch ${t} by subagent type`);
+  }
+  // the old inline-the-full-content pattern must be gone
+  assert.doesNotMatch(f, /inline the full content of .*agents\/.*\.md/i, "must not inline agent .md bodies into prompts");
+});
+
+test("SKILL gates each wave on the verifier and forbids the orchestrator self-verifying", () => {
+  const f = read("skills/run/SKILL.md");
+  // teams-aware verifier completion: poll the actual task result, not a status guess
+  assert.match(f, /poll the verifier's task result|task result \/ mailbox[\s\S]{0,200}verifier/i, "teams backend must poll the verifier's task result");
+  // explicit no-self-verify rule
+  assert.match(f, /No-self-verify|MUST NOT perform the verification itself|MUST NOT substitute its own judgment/i, "must forbid the orchestrator from self-verifying");
+  // missing verdict routes to UNVERIFIABLE, not a silently-closed wave
+  assert.match(f, /UNVERIFIABLE[\s\S]{0,160}(aggregate|fix-plan|re-run)/i, "missing verdict must route through the fix-plan loop");
+});
+
+test("SKILL has a verifier-coverage gate before aggregation", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /Verifier-coverage gate/i, "must define a verifier-coverage gate");
+  // gate lives at the top of Step 5, before the bug count, so both the clean and buggy paths hit it
+  assert.ok(
+    f.indexOf("Verifier-coverage gate") < f.indexOf("Count total bugs across all bug JSONs"),
+    "the coverage gate must run before counting bugs"
+  );
+  assert.match(f, /every.{0,10}wave[\s\S]{0,120}wave-<W>\.json/i, "must assert every wave produced a bug JSON");
+  assert.match(f, /structurally impossible to reach the PR|PR.{0,40}(outstanding|while a verifier)/i, "gate must block opening a PR while a verdict is outstanding");
+});
+
+test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "must read the agent-teams env var");
+  assert.match(f, /backend\s*=\s*"teams"/, "must select the teams backend");
+  assert.match(f, /backend\s*=\s*"subagent"/, "must fall back to the subagent backend");
+  assert.match(f, /per-wave barrier|wave barrier/i, "both backends must keep the per-wave barrier");
+});
+
+test("docs + version reflect the TDD feature", () => {
+  const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.equal(pkg.version, "1.5.0", "plugin version is current");
+  const readme = read("README.md");
+  assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
+  assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
+});
+
+test("git is optional: run skill gates all git ops on availability", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /git rev-parse --is-inside-work-tree/, "must detect git via rev-parse --is-inside-work-tree");
+  assert.match(f, /git_available/, "must set a git_available flag");
+  // clean-tree check, per-wave commit, and PR step must each be gated
+  // (allow backticks around `git_available` in the prose)
+  assert.match(f, /git_available.{0,3}is false[\s\S]{0,80}skip this step/i, "clean-tree check skipped when git absent");
+  assert.match(f, /git_available.{0,3}is false[\s\S]{0,120}(skipping commit|git not available)/i, "per-wave commit skipped when git absent");
+  assert.match(f, /git_available.{0,3}is false[\s\S]{0,400}plan-runner:pr/i, "PR step skipped when git absent");
+});
+
+test("git is optional: pr skill guards on git availability", () => {
+  const f = read("skills/pr/SKILL.md");
+  assert.match(f, /git rev-parse --is-inside-work-tree/, "pr skill must pre-check git");
+  assert.match(f, /git not available[\s\S]{0,120}(Skipping|STOP)/i, "pr skill must STOP gracefully when git is absent");
+});
+
+test("manifest schema documents git_available", () => {
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.ok(schema.properties.git_available, "manifest schema must define git_available");
+  assert.equal(schema.properties.git_available.type, "boolean", "git_available is a boolean");
+});
+
+test("run skill syncs code-atlas before the PR step", () => {
+  const f = read("skills/run/SKILL.md");
+  // a dedicated step exists and precedes OPEN PR
+  assert.match(f, /Step 7-bis: SYNC CODE ATLAS/, "must define the code-atlas sync step");
+  assert.ok(
+    f.indexOf("Step 7-bis: SYNC CODE ATLAS") < f.indexOf("Step 8: OPEN PR"),
+    "the sync step must come before the OPEN PR step"
+  );
+  // detection is gated on the code-atlas state file and invokes the incremental update
+  assert.match(f, /\.code-atlas\/state\.json/, "must detect code-atlas via state.json");
+  assert.match(f, /code-atlas:update/, "must invoke the code-atlas:update skill");
+  // gated on git availability like the other git-dependent steps
+  assert.match(f, /git_available.{0,3}is false[\s\S]{0,160}code-atlas sync skipped/i, "sync skipped when git absent");
+  // both PR-bound paths route through the sync step
+  assert.match(f, /Proceed to Step 7-bis/, "clean-run + stop-rerun paths route through the sync step");
+});
+
+test("manifest schema documents code_atlas_sync", () => {
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.ok(schema.properties.code_atlas_sync, "manifest schema must define code_atlas_sync");
+  assert.ok(schema.properties.code_atlas_sync.properties.ran, "code_atlas_sync has a ran flag");
+});
+
+test("README documents the code-atlas sync", () => {
+  const readme = read("README.md");
+  assert.match(readme, /code-atlas:update|Code Atlas sync/i, "README documents the code-atlas sync");
+});
+
+test("manifest schema documents token_usage", () => {
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.ok(schema.properties.token_usage, "manifest schema must define token_usage");
+  const tu = schema.properties.token_usage;
+  for (const key of ["total_tokens", "agents_reported", "agents_total", "complete"]) {
+    assert.ok(tu.required.includes(key), `token_usage requires ${key}`);
+  }
+  // per-agent token shape is reusable via $defs and attached to wave agents
+  assert.ok(schema.$defs && schema.$defs.tokenCount, "schema defines a reusable tokenCount shape");
+  const agentProps = schema.properties.waves.items.properties.agents.items.properties;
+  assert.ok(agentProps.tokens, "wave agent entries carry per-agent tokens");
+});
+
+test("run skill captures and tallies subagent tokens", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /## Token accounting/, "run skill documents token accounting");
+  // best-effort, never fabricated
+  assert.match(f, /best-effort/i, "token capture is described as best-effort");
+  assert.match(f, /[Nn]ever fabricate/, "skill forbids fabricating token counts");
+  // captured for each subagent class
+  assert.match(f, /analyzer["']?,\s*"phase":\s*"analyze"/, "analyzer tokens are captured");
+  assert.match(f, /"phase":\s*"wave"/, "dev-agent tokens are captured");
+  assert.match(f, /verifier["']?,\s*"phase":\s*"verify"/, "verifier tokens are captured");
+  assert.match(f, /aggregator["']?,\s*"phase":\s*"aggregate"/, "aggregator tokens are captured");
+  // tally fields are finalized and surfaced
+  assert.match(f, /total_tokens/, "skill tallies a grand total");
+  assert.match(f, /agents_reported/, "skill tracks reporting coverage");
+});
+
+test("pr skill surfaces token totals in stats", () => {
+  const f = read("skills/pr/SKILL.md");
+  assert.match(f, /token_usage/, "pr skill reads token_usage from the manifest");
+  assert.match(f, /Tokens:.{0,80}subagents/, "pr stats include a Tokens line");
+});
+
+test("README documents token accounting", () => {
+  const readme = read("README.md");
+  assert.match(readme, /## Token accounting/, "README has a token accounting section");
+  assert.match(readme, /token_usage/, "README references the manifest token_usage field");
+  assert.match(readme, /best-effort/i, "README is honest that capture is best-effort");
+});
+
+test("docs cover the Agent Teams backend", () => {
+  const readme = read("README.md");
+  assert.match(readme, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "README documents the agent-teams env var");
+  assert.match(readme, /2\.1\.178/, "README notes the Claude Code version requirement");
+});

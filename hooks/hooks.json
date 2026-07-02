@@ -1,0 +1,17 @@
+{
+  "description": "plan-runner SessionStart hook: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-gitignore.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

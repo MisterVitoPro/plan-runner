@@ -1,0 +1,21 @@
+{
+  "source_plan": "docs/foo/plan.md",
+  "context7_available": false,
+  "waves": [
+    {
+      "wave_id": 1,
+      "agents": [
+        {
+          "agent_id": "wave-1-agent-1",
+          "task_title": "write tests for adder",
+          "task_excerpt_lines": "10-20",
+          "owned_files": ["tests/adder.test.js"],
+          "acceptance_criteria": ["covers add(2,3) == 5"],
+          "recommended_model": "sonnet",
+          "role": "implementer"
+        }
+      ]
+    }
+  ],
+  "uncovered_plan_sections": []
+}

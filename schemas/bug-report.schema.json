@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bug-report.schema.json",
+  "title": "Verifier Bug Report",
+  "type": "object",
+  "required": ["agent_id", "task_title", "verifier_status", "bugs"],
+  "properties": {
+    "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+    "task_title": {"type": "string"},
+    "verifier_status": {"type": "string", "enum": ["CLEAN", "BUGS_FOUND", "UNVERIFIABLE"]},
+    "bugs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["bug_id", "severity", "category", "title", "file", "evidence", "expected", "suggested_fix"],
+        "properties": {
+          "bug_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+-bug-[0-9]+$"},
+          "severity": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
+          "category": {"type": "string", "enum": ["missing_requirement", "incorrect_implementation", "scope_drift", "broken_existing"]},
+          "title": {"type": "string"},
+          "file": {"type": "string"},
+          "line": {"type": ["integer", "null"]},
+          "evidence": {"type": "string"},
+          "expected": {"type": "string"},
+          "suggested_fix": {"type": "string"}
+        }
+      }
+    }
+  }
+}

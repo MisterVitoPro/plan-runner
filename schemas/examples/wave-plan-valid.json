@@ -1,0 +1,54 @@
+{
+  "source_plan": "docs/foo/plan.md",
+  "context7_available": false,
+  "waves": [
+    {
+      "wave_id": 1,
+      "agents": [
+        {
+          "agent_id": "wave-1-agent-1",
+          "task_title": "write tests for adder",
+          "task_excerpt_lines": "10-20",
+          "owned_files": ["tests/adder.test.js"],
+          "acceptance_criteria": ["covers add(2,3) == 5"],
+          "recommended_model": "sonnet",
+          "role": "test-author",
+          "testable": true
+        }
+      ]
+    },
+    {
+      "wave_id": 2,
+      "agents": [
+        {
+          "agent_id": "wave-2-agent-1",
+          "task_title": "implement adder",
+          "task_excerpt_lines": "10-20",
+          "owned_files": ["src/adder.js"],
+          "acceptance_criteria": ["add returns the sum"],
+          "recommended_model": "sonnet",
+          "role": "impl",
+          "testable": true,
+          "tests_to_satisfy": ["tests/adder.test.js"]
+        }
+      ]
+    },
+    {
+      "wave_id": 3,
+      "agents": [
+        {
+          "agent_id": "wave-3-agent-1",
+          "task_title": "update the README",
+          "task_excerpt_lines": "30-35",
+          "owned_files": ["README.md"],
+          "acceptance_criteria": ["documents the adder"],
+          "recommended_model": "haiku",
+          "role": "standalone",
+          "testable": false,
+          "non_testable_reason": "pure docs, no behavior to test"
+        }
+      ]
+    }
+  ],
+  "uncovered_plan_sections": []
+}

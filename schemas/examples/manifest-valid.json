@@ -1,0 +1,50 @@
+{
+  "cycle": 1,
+  "input_plan": "docs/foo/plan.md",
+  "started_at": "2026-06-02T00:00:00Z",
+  "completed_at": "2026-06-02T00:10:00Z",
+  "context7_available": false,
+  "git_available": true,
+  "backend": "teams",
+  "waves": [
+    {
+      "wave_id": 1,
+      "duration_seconds": 42,
+      "agents": [
+        {"agent_id": "wave-1-agent-1", "dev_status": "DONE", "verifier_status": "CLEAN", "bug_count": 0, "tokens": {"input": 12000, "output": 3400, "total": 15400}},
+        {"agent_id": "wave-1-agent-2", "dev_status": "DONE", "verifier_status": "CLEAN", "bug_count": 0, "tokens": null}
+      ],
+      "verifier_tokens": {"input": 8000, "output": 1200, "total": 9200},
+      "wave_token_total": 24600,
+      "commit_sha": "abc123",
+      "skipped_reason": null
+    }
+  ],
+  "total_bugs": 0,
+  "token_usage": {
+    "by_agent": [
+      {"agent": "analyzer", "phase": "analyze", "input": 5000, "output": 900, "total": 5900},
+      {"agent": "wave-1-agent-1", "phase": "wave", "input": 12000, "output": 3400, "total": 15400},
+      {"agent": "wave-1-agent-2", "phase": "wave", "input": null, "output": null, "total": null},
+      {"agent": "wave-1-verifier", "phase": "verify", "input": 8000, "output": 1200, "total": 9200}
+    ],
+    "total_tokens": 30500,
+    "agents_reported": 3,
+    "agents_total": 4,
+    "complete": false
+  },
+  "next_cycle_plan": null,
+  "tdd": {
+    "enabled": true,
+    "test_command": {"full": "npm test", "single_file": "npm test -- {file}"},
+    "baseline_failing": [],
+    "tasks": [
+      {
+        "task": "implement adder",
+        "test_files": ["tests/adder.test.js"],
+        "red_run": {"cmd": "npm test -- tests/adder.test.js", "exit": 1, "result": "FAILED", "valid_red": true},
+        "green_run": {"cmd": "npm test -- tests/adder.test.js", "exit": 0, "result": "PASSED"}
+      }
+    ]
+  }
+}

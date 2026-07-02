@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dev-return.schema.json",
+  "title": "Dev Agent Return",
+  "type": "object",
+  "required": ["agent_id", "status", "files_written", "files_unexpectedly_modified", "context7_queries", "summary", "concerns"],
+  "properties": {
+    "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+    "status": {"type": "string", "enum": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"]},
+    "files_written": {"type": "array", "items": {"type": "string"}},
+    "files_unexpectedly_modified": {"type": "array", "items": {"type": "string"}},
+    "context7_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["library", "purpose"],
+        "properties": {"library": {"type": "string"}, "purpose": {"type": "string"}}
+      }
+    },
+    "summary": {"type": "string"},
+    "concerns": {"type": "array", "items": {"type": "string"}},
+    "test_files": {"type": "array", "items": {"type": "string"}, "description": "test-author role: test files written, for orchestrator-scoped gate runs."},
+    "test_ids": {"type": "array", "items": {"type": "string"}, "description": "test-author role: individual test names/IDs added."}
+  }
+}

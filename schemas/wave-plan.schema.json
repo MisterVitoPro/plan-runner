@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wave-plan.schema.json",
+  "title": "Wave Plan",
+  "description": "Output of the plan-analyzer agent. Defines waves of file-disjoint dev tasks (max 6 per wave). `rationale` and `complexity_signals` are emitted only when verbose mode is enabled.",
+  "type": "object",
+  "required": ["source_plan", "context7_available", "waves", "uncovered_plan_sections"],
+  "properties": {
+    "source_plan": {"type": "string", "description": "Path to the input plan.md file"},
+    "context7_available": {"type": "boolean"},
+    "waves": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["wave_id", "agents"],
+        "properties": {
+          "wave_id": {"type": "integer", "minimum": 1},
+          "rationale": {"type": "string", "description": "Verbose mode only. Why these tasks belong together in this wave."},
+          "agents": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "required": ["agent_id", "task_title", "task_excerpt_lines", "owned_files", "acceptance_criteria", "recommended_model"],
+              "properties": {
+                "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+                "task_title": {"type": "string"},
+                "task_excerpt_lines": {"type": "string", "pattern": "^[0-9]+-[0-9]+$", "description": "Line range in source_plan, 1-indexed inclusive, e.g. '45-62'. Dev agents read this range from source_plan rather than receiving the prose inline."},
+                "owned_files": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                "acceptance_criteria": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                "recommended_model": {"type": "string", "enum": ["haiku", "sonnet", "opus"]},
+                "complexity_signals": {"type": "array", "items": {"type": "string"}, "description": "Verbose mode only. Observations about inference confidence (e.g., 'file path inferred')."},
+                "role": {"type": "string", "enum": ["test-author", "impl", "standalone"], "description": "TDD role. Omitted on classic (non-TDD) runs."},
+                "testable": {"type": "boolean", "description": "TDD mode only. True for test-author/impl agents, false for non-testable standalone tasks."},
+                "non_testable_reason": {"type": "string", "description": "TDD mode only. One-line reason a standalone task was classified non-testable."},
+                "tests_to_satisfy": {"type": "array", "items": {"type": "string"}, "description": "impl role only. Test files (from the paired test-author) the implementation must make pass."}
+              }
+            }
+          }
+        }
+      }
+    },
+    "uncovered_plan_sections": {"type": "array", "items": {"type": "string"}}
+  }
+}

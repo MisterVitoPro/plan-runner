@@ -1,0 +1,11 @@
+{
+  "agent_id": "wave-1-agent-1",
+  "status": "DONE",
+  "files_written": ["tests/adder.test.js"],
+  "files_unexpectedly_modified": [],
+  "context7_queries": [],
+  "summary": "Wrote failing tests for the adder.",
+  "concerns": [],
+  "test_files": ["tests/adder.test.js"],
+  "test_ids": ["adds two numbers"]
+}
