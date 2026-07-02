@@ -130,10 +130,30 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.6.0", "plugin version is current");
+  assert.equal(pkg.version, "1.7.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
+});
+
+test("SKILL tears down dev agents and the wave verifier after every wave (no idle agents)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /Tear down wave dev agents/i, "must define a dev-agent teardown step");
+  assert.match(f, /Tear down the wave verifier/i, "must tear down the wave verifier too");
+  // teardown for both backends via TaskStop
+  assert.match(f, /TaskStop[\s\S]{0,120}task_id/i, "subagent backend tears down via TaskStop with the task_id");
+  assert.match(f, /TaskStop[\s\S]{0,160}(teammate|name@team)/i, "teams backend tears down via TaskStop with the teammate id");
+  // dev-agent teardown happens regardless of status, and before the next dispatch
+  assert.match(f, /regardless of `?dev_status`?[\s\S]{0,40}(DONE|BLOCKED)/i, "dev agents are torn down regardless of DONE/BLOCKED status");
+  // verifier teardown happens regardless of verdict
+  assert.match(f, /regardless of `?verifier_status`?[\s\S]{0,60}(CLEAN|BUGS_FOUND|UNVERIFIABLE)/i, "verifier is torn down regardless of its verdict");
+  // teardown must happen for every wave, not just at the end of the whole run
+  assert.match(f, /every wave, not only the last one/i, "teardown must run wave by wave, not deferred to the end of the cycle");
+  // the teardown step must precede the next dispatch point (verifier dispatch)
+  assert.ok(
+    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Dispatch wave verifier"),
+    "dev-agent teardown must happen before the wave verifier is dispatched"
+  );
 });
 
 test("git is optional: run skill gates all git ops on availability", () => {

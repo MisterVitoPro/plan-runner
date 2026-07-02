@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.7.0 - 2026-07-02
+
+- **Agent teardown (no more idle agents).** A finished dev agent or wave verifier does not exit on its own -- it stayed resident as an idle background task (subagent backend) or idle teammate (teams backend) until the whole cycle ended. Every wave now explicitly calls `TaskStop` on each dev agent immediately after its result is captured (before the wave verifier is dispatched) and on the wave verifier immediately after its report is captured, regardless of status/verdict. This runs wave by wave, so agents from wave 1 no longer idle for the rest of a multi-wave run.
+
 ## 1.6.0 - 2026-07-01
 
 - **End-of-run Token Report.** Both end-of-run paths (clean and bugs-found) now print a full token report rendered from `manifest.json` `token_usage`: a per-phase table (Analyze / Dev / Verify / Aggregate) with input, output, and total sums, a per-phase reported-coverage column, a top-consumers line naming the most expensive subagents, and a grand total with an honest coverage line. Sums cover non-null figures only; partial coverage is labeled a lower bound.
