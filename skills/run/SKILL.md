@@ -361,7 +361,7 @@ Record `t_confirmed = $(date +%s)`.
 
 ## Step 4: WAVE EXECUTION
 
-Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Gates (4a-bis), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
+Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
 
 For each wave in `wave_plan.waves` (sequentially):
 
@@ -421,7 +421,16 @@ For each dev agent return (both backends):
 
 **Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), read the owned-file state directly, treat any unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
 
-### 4a-bis. Run gates (only if tdd_enabled)
+### 4a-bis. Tear down wave dev agents
+
+A finished dev agent does not exit on its own -- it stays resident (an idle background task or an idle teammate) until explicitly stopped. As soon as the wave barrier above is satisfied and every dev agent's return has been captured, tear each one down immediately, before dispatching the wave verifier (4b):
+
+- **Backend `subagent`:** call `TaskStop` with the background `task_id` created for that agent in 4a.
+- **Backend `teams`:** call `TaskStop` with the teammate's agent ID (`name@team`) or bare teammate name.
+
+Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BLOCKED`) -- a blocked agent still holds its process open. If `TaskStop` reports the task already gone, treat that as success; there is nothing left to release. Do this for every wave, not only the last one -- letting agents from wave 1 idle until the whole cycle ends wastes resources for the run's entire duration.
+
+### 4a-ter. Run gates (only if tdd_enabled)
 
 If `tdd_enabled` is false, skip this step (classic pipeline).
 
@@ -478,7 +487,7 @@ DEV AGENT REPORTED:
 - role: <agent role or "standalone">
 - tests_to_satisfy: <impl only: tests_to_satisfy joined with newlines, else "n/a">
 - captured_test_output: |
-  <verbatim gate output captured in 4a-bis, or "n/a" for standalone/classic>
+  <verbatim gate output captured in 4a-ter, or "n/a" for standalone/classic>
 ---
 <end repeat>
 
@@ -505,6 +514,8 @@ Parse the verifier's return. If parse fails, synthesize:
 Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
 
 Capture the verifier's token usage (see **Token accounting**), store it as the wave's `verifier_tokens`, and append it to `token_usage.by_agent` as `{"agent": "wave-<W>-verifier", "phase": "verify", ...}`.
+
+**Tear down the wave verifier.** Its report is now captured -- release it the same way as the dev agents in 4a-bis: `TaskStop` on its background `task_id` (subagent backend) or its teammate agent ID / name (teams backend). Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, or `UNVERIFIABLE`) -- an unverifiable run still leaves a process to release.
 
 ### 4d. Render wave dashboard
 

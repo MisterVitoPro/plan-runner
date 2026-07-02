@@ -62,6 +62,10 @@ Teams** orchestration and uses it when available:
   in-process view works everywhere (including Windows Terminal). The re-run loop
   on the teams backend continues in the same lead session, since teammates cannot
   spawn nested teams.
+- **No idle agents.** A finished dev agent or verifier does not exit on its own --
+  the lead explicitly tears it down (background task or teammate) the moment its
+  result is captured, wave by wave, so agents never sit idle for the rest of the
+  run.
 
 ## Token accounting
 
