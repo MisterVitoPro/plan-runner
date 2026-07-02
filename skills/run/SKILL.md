@@ -370,7 +370,7 @@ Print:
 [Phase 2/4] Wave <W>/<total_W>: dispatching <N> dev agents in parallel...
 ```
 
-Record `t_wave_<W>_start = $(date +%s)`.
+Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
 
 ### 4a. Dispatch dev agents (parallel)
 
@@ -420,6 +420,8 @@ For each dev agent return (both backends):
 4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}` (use `tokens: null` if the harness surfaced no figure -- common for teammates on the `teams` backend).
 
 **Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), read the owned-file state directly, treat any unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
+
+**Rogue-commit guard (both backends, only if `git_available` is true):** Dev agents are forbidden from committing, but one that disobeys leaves a clean working tree that makes its work look undone. Before treating any dev agent as silent-failed (missing return, empty owned-file diff, no working-tree changes) -- and before dispatching any retry or replacement agent for it -- run `git log --oneline <wave_start_sha>..HEAD -- <owned_files>` scoped to that agent's owned files. If commits appear, the agent rogue self-committed: the work counts as delivered, so do NOT dispatch a retry agent. Print a warning naming the agent and the rogue commit SHA(s), record the SHAs in the wave-state map, and let the wave verifier (4b) judge the content exactly as it would judge uncommitted work. Judging by working-tree diff alone is not sufficient evidence that an agent did nothing.
 
 ### 4a-bis. Tear down wave dev agents
 
@@ -554,7 +556,9 @@ git add -A
 git status --porcelain | head -1   # check if there's anything to commit
 ```
 
-If nothing to commit (all dev agents BLOCKED, no files changed):
+If the working tree is clean, do NOT immediately conclude the wave is empty -- first check for rogue self-commits: run `git log --oneline <wave_start_sha>..HEAD`. If commits exist, the wave's work was self-committed by dev agents. Set `commit_sha = $(git rev-parse HEAD)`, `skipped_reason = "self-committed by dev agents (rogue)"`, print a warning listing the rogue commit SHAs, and continue to the next wave (do not create an empty commit).
+
+If nothing to commit AND no commits since `wave_start_sha` (all dev agents BLOCKED, no files changed):
 - Set `commit_sha = null`, `skipped_reason = "no changes"` in manifest entry.
 - Print `Wave <W>: nothing to commit.`
 - Continue to next wave.

@@ -65,7 +65,7 @@ You MUST return a single JSON object matching `dev-return.schema.json`. No prose
 ## Rules
 
 - Do NOT run tests. The orchestrator runs the green gate against `tests_to_satisfy` after this wave and captures the evidence; if your implementation does not make those tests pass, the green-gate verifier will flag it as a bug for the next cycle.
-- Do NOT commit. The orchestrator commits per wave.
+- NEVER run `git add`, `git commit`, or `git push` -- no git write of any kind. The orchestrator commits per wave; a self-commit corrupts the per-wave history and makes your work look undone to the orchestrator. If you find yourself about to run a git command, stop: it is always wrong here.
 - Do NOT modify files outside `owned_files` unless strictly necessary.
 - Do NOT extend the task beyond the acceptance criteria. If something obvious is missing from the criteria, note it in `concerns` -- do not silently add it.
 - Return valid JSON ONLY. No prose before or after.
