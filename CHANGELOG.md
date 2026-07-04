@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.8.1 - 2026-07-04
+
+- **Analyzer parse-retry reuses the session.** When the analyzer's first response fails to parse as JSON, the run skill now retries by continuing the SAME analyzer session via `SendMessage` (to the analyzer's returned agent id) rather than dispatching a fresh analyzer. The retry prompt says "your previous response," which only resolves against the session that produced it, and a fresh spawn would have to resend the entire plan text a second time -- wasteful for large plans. Prose clarification only; the two-attempt limit and STOP-on-second-failure behavior are unchanged.
+
 ## 1.8.0 - 2026-07-02
 
 - **Rogue-commit guard.** A dev agent that disobeys the no-commit rule and commits its own work leaves a clean working tree, which the orchestrator previously misread as "agent produced nothing" -- triggering a wasted retry agent, and mislabeling the wave commit as "no changes". The run skill now records `wave_start_sha` at the start of every wave (when git is available) and, before treating any dev agent as silent-failed or dispatching a retry, checks `git log <wave_start_sha>..HEAD -- <owned_files>`; self-committed work counts as delivered and flows to the wave verifier as usual. The wave-commit step (4e) likewise distinguishes a genuinely empty wave from one self-committed by agents (`skipped_reason = "self-committed by dev agents (rogue)"`, with the real HEAD recorded as `commit_sha`). All checks are gated on `git_available`.
