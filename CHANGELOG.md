@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.8.3 - 2026-07-04
+
+- **Fix release automation: tag step had no git identity.** The `marketplace-pin` workflow created an annotated tag (`git tag -a`) without configuring a committer identity on the runner, so the tag step failed with `empty ident name` and the marketplace pin never ran (caught by the first live release, v1.8.2). It now sets the `github-actions[bot]` identity before tagging.
+
 ## 1.8.2 - 2026-07-04
 
 - **Release automation.** Added a `marketplace-pin` GitHub Actions workflow: when a merge to `main` bumps `plugin.json`'s version, it tags the merge commit `vX.Y.Z` and updates this plugin's `ref` + `sha` + `description` in the `MisterVitoPro/qa-claude-market` marketplace, authenticated by a repo-scoped SSH deploy key. Routine releases no longer need a manual tag or marketplace edit; non-release merges are a no-op.
