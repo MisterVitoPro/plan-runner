@@ -1,0 +1,92 @@
+name: Marketplace pin
+
+# On every push to main, if this push bumped the plugin version (a release
+# merge), tag the merge commit v<version> and update the marketplace entry in
+# MisterVitoPro/qa-claude-market to pin the new ref + sha (and sync the
+# description). Ordinary merges that do not touch the version are a no-op.
+#
+# Requires a repo secret MARKETPLACE_TOKEN: a PAT with write (contents) access
+# to MisterVitoPro/qa-claude-market. The default GITHUB_TOKEN cannot push to
+# another repository. Without it the "Checkout marketplace" step fails loudly.
+
+on:
+  push:
+    branches: [main]
+
+# Serialize pins so a later release never races an in-flight one.
+concurrency:
+  group: marketplace-pin
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create + push the version tag in THIS repo
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plan-runner
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # need HEAD~1 to detect a version change
+
+      - name: Detect release (version bump)
+        id: ver
+        run: |
+          NEW=$(jq -r .version .claude-plugin/plugin.json)
+          OLD=$(git show HEAD~1:.claude-plugin/plugin.json 2>/dev/null | jq -r .version || echo none)
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          if [ "$NEW" = "$OLD" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "plugin.json version unchanged ($NEW) -- not a release merge, skipping."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Release detected: ${OLD} -> ${NEW}"
+          fi
+
+      - name: Create and push tag
+        if: steps.ver.outputs.release == 'true'
+        run: |
+          TAG="v${{ steps.ver.outputs.new }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists -- leaving it as-is."
+          else
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Checkout marketplace
+        if: steps.ver.outputs.release == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: MisterVitoPro/qa-claude-market
+          token: ${{ secrets.MARKETPLACE_TOKEN }}
+          path: market
+
+      - name: Pin plan-runner in the marketplace
+        if: steps.ver.outputs.release == 'true'
+        run: |
+          TAG="v${{ steps.ver.outputs.new }}"
+          SHA="${{ github.sha }}"
+          DESC=$(jq -r .description .claude-plugin/plugin.json)
+          FILE=market/.claude-plugin/marketplace.json
+
+          jq --arg ref "$TAG" --arg sha "$SHA" --arg desc "$DESC" '
+              (.plugins[] | select(.name=="plan-runner").source.ref) = $ref
+            | (.plugins[] | select(.name=="plan-runner").source.sha) = $sha
+            | (.plugins[] | select(.name=="plan-runner").description)  = $desc
+          ' "$FILE" > "$FILE.tmp"
+          mv "$FILE.tmp" "$FILE"
+
+          # Fail fast if the edit produced invalid JSON.
+          node -e "JSON.parse(require('fs').readFileSync('$FILE','utf8'))"
+
+          if git -C market diff --quiet; then
+            echo "Marketplace already pins $TAG @ $SHA -- nothing to commit."
+          else
+            git -C market config user.name  "github-actions[bot]"
+            git -C market config user.email "github-actions[bot]@users.noreply.github.com"
+            git -C market add .claude-plugin/marketplace.json
+            git -C market commit -m "chore: pin plan-runner $TAG ($SHA)"
+            git -C market push origin HEAD:main
+          fi
