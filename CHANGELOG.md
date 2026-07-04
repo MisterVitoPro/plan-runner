@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.8.2 - 2026-07-04
+
+- **Release automation.** Added a `marketplace-pin` GitHub Actions workflow: when a merge to `main` bumps `plugin.json`'s version, it tags the merge commit `vX.Y.Z` and updates this plugin's `ref` + `sha` + `description` in the `MisterVitoPro/qa-claude-market` marketplace, authenticated by a repo-scoped SSH deploy key. Routine releases no longer need a manual tag or marketplace edit; non-release merges are a no-op.
+
 ## 1.8.1 - 2026-07-04
 
 - **Analyzer parse-retry reuses the session.** When the analyzer's first response fails to parse as JSON, the run skill now retries by continuing the SAME analyzer session via `SendMessage` (to the analyzer's returned agent id) rather than dispatching a fresh analyzer. The retry prompt says "your previous response," which only resolves against the session that produced it, and a fresh spawn would have to resend the entire plan text a second time -- wasteful for large plans. Prose clarification only; the two-attempt limit and STOP-on-second-failure behavior are unchanged.
