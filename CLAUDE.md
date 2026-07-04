@@ -22,7 +22,7 @@ A release touches four places, in one commit:
 
 Tagging and the marketplace pin are **automated** by `.github/workflows/marketplace-pin.yml`: when a merge to `main` bumps `plugin.json`'s `version`, it tags the merge commit `vX.Y.Z` and updates the plugin's entry (`ref` + `sha` + `description`) in `MisterVitoPro/qa-claude-market` `.claude-plugin/marketplace.json`. So a normal release is just: land the four-place version-bump commit on `main` via PR — the tag and the marketplace bump follow on their own. Don't hand-tag or hand-edit the marketplace for a routine release; doing both by hand races the workflow.
 
-Caveats: the workflow needs the `MARKETPLACE_TOKEN` repo secret (a PAT with `contents: write` on `qa-claude-market`) — without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
+Caveats: the workflow authenticates to `qa-claude-market` with the `MARKETPLACE_DEPLOY_KEY` repo secret — the private half of an SSH deploy key registered with write access on that repo (scoped to it alone, not a personal PAT). Without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
 
 ## Honesty invariants (never weaken these)
 
