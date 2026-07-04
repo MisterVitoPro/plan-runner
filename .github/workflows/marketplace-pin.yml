@@ -5,9 +5,11 @@ name: Marketplace pin
 # MisterVitoPro/qa-claude-market to pin the new ref + sha (and sync the
 # description). Ordinary merges that do not touch the version are a no-op.
 #
-# Requires a repo secret MARKETPLACE_TOKEN: a PAT with write (contents) access
-# to MisterVitoPro/qa-claude-market. The default GITHUB_TOKEN cannot push to
-# another repository. Without it the "Checkout marketplace" step fails loudly.
+# Requires a repo secret MARKETPLACE_DEPLOY_KEY: the private half of an SSH
+# deploy key registered with write access on MisterVitoPro/qa-claude-market.
+# The default GITHUB_TOKEN cannot push to another repository; a deploy key is
+# scoped to exactly that one repo (least privilege, unlike a personal PAT).
+# Without it the "Checkout marketplace" step fails loudly.
 
 on:
   push:
@@ -60,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: MisterVitoPro/qa-claude-market
-          token: ${{ secrets.MARKETPLACE_TOKEN }}
+          ssh-key: ${{ secrets.MARKETPLACE_DEPLOY_KEY }}
           path: market
 
       - name: Pin plan-runner in the marketplace
