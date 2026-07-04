@@ -306,7 +306,7 @@ Return only the JSON wave plan, nothing else.
 Run the agent in foreground (you need its output to proceed). Use `model: <analyzer_model>` from step 1c-bis (that field applies to the analyzer itself; per-task `recommended_model` applies to dev agents downstream).
 
 When the agent returns, parse the JSON. If parsing fails:
-- Retry ONCE with: "Your previous response could not be parsed as JSON. Return ONLY a single JSON object matching wave-plan.schema.json, with no prose before or after."
+- Retry ONCE by **continuing the SAME analyzer session** -- send the follow-up via `SendMessage` to the analyzer's returned agent id; do NOT dispatch a fresh analyzer. The phrase "your previous response" only resolves against the session that produced it, and a fresh spawn would have to resend the entire plan text again (wasteful for large plans). Follow-up message: "Your previous response could not be parsed as JSON. Return ONLY a single JSON object matching wave-plan.schema.json, with no prose before or after."
 - If second attempt also fails, print the agent's raw output and STOP.
 
 Validate the wave plan:

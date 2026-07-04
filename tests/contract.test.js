@@ -62,6 +62,16 @@ test("SKILL passes tdd flags to analyzer and shows roles in the wave plan", () =
   assert.match(f, /\[test\]|\[impl\]|role|testable|non-testable/i, "wave-plan display must surface roles/testability");
 });
 
+test("SKILL analyzer parse-retry continues the same session (no plan resend)", () => {
+  const f = read("skills/run/SKILL.md");
+  // the retry must reuse the analyzer session via SendMessage, not respawn
+  assert.match(f, /continuing the SAME analyzer session/i, "retry must continue the same analyzer session");
+  assert.match(f, /SendMessage[\s\S]{0,80}agent id/i, "retry is sent via SendMessage to the analyzer's agent id");
+  assert.match(f, /do NOT dispatch a fresh analyzer/i, "retry must not respawn a fresh analyzer");
+  // the token-efficiency rationale (avoid resending the plan) is recorded
+  assert.match(f, /resend the entire plan|resend.{0,20}plan/i, "must note that a fresh spawn would resend the whole plan");
+});
+
 test("SKILL runs per-agent red/green gates, routes bugs, records evidence", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /Red gate/i, "red gate step");
@@ -130,7 +140,7 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.8.0", "plugin version is current");
+  assert.equal(pkg.version, "1.8.1", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
