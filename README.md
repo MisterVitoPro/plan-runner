@@ -73,15 +73,18 @@ plan-runner tallies the tokens consumed by every subagent it dispatches -- the
 analyzer, every dev agent, each wave verifier, and the aggregator -- so you can
 see what a cycle cost. The tally is written to `manifest.json` under
 `token_usage` (a per-agent `by_agent` breakdown plus a `total_tokens` grand
-total) and surfaced in the wave dashboards, the end-of-run Token Report, and the
+total) and surfaced in the wave dashboards, the end-of-run Run Report, and the
 PR stats.
 
 At the end of every run (both the clean path and the bugs-found path) plan-runner
-prints a **Token Report**: a per-phase table (Analyze / Dev / Verify / Aggregate)
-with input, output, and total sums, a per-phase reported-coverage column, a
-top-consumers line naming the most expensive subagents, and a grand total with an
-honest coverage line. The PR body carries a compact per-phase breakdown under its
-`Tokens:` stat.
+prints one **Run Report**: a status-aware title, a two-column at-a-glance stat
+header (waves, dev agents, verifiers, commits, duration, tokens, coverage, bugs),
+then detail tables -- a per-phase token table (Analyze / Dev / Verify / Aggregate)
+with input, output, and total sums, a per-phase reported-coverage column, and a
+top-consumers line naming the most expensive subagents; a per-phase timing table;
+and an artifacts block. Partial token coverage is flagged as a lower bound and any
+unverified waves are called out, both directly under the stat header. The PR body
+carries a compact per-phase token breakdown under its `Tokens:` stat.
 
 Capture is **best-effort**: there is no tool that returns a subagent's token
 count, so plan-runner records the usage figure the harness surfaces when each

@@ -325,19 +325,27 @@ test("pr skill surfaces token totals in stats", () => {
   assert.match(f, /By phase:.{0,80}(analyze|dev|verify|aggregate)/i, "pr stats include a per-phase breakdown");
 });
 
-test("run skill renders an end-of-run Token Report", () => {
+test("run skill renders a unified end-of-run Run Report", () => {
   const f = read("skills/run/SKILL.md");
-  // a rendering spec exists under the Token accounting section
-  assert.match(f, /### End-of-run Token Report/, "must define the Token Report rendering spec");
-  assert.match(f, /Top consumers/, "report lists top-consuming subagents");
-  assert.match(f, /Coverage:/, "report carries an honest coverage line");
-  assert.match(f, /lower bound/i, "partial coverage is described as a lower bound");
-  assert.match(f, /Omit a phase row/i, "phases with no dispatched agents are omitted, not zero-filled");
-  // both end-of-run paths print it: Step 6 (bugs) and Step 7 (clean)
-  const refs = f.match(/rendered per the "End-of-run Token Report" spec/g) || [];
-  assert.ok(refs.length >= 2, "both Step 6 and Step 7 must print the Token Report block");
-  // honesty invariant: sums cover non-null values only
-  assert.match(f, /non-null.{0,40}values only|sums of the \*\*non-null\*\* values/i, "sums must skip null entries");
+  // one reusable rendering spec, referenced by name
+  assert.match(f, /### End-of-run Run Report/, "defines the unified Run Report spec");
+  // three detail sections under one report
+  assert.match(f, /Tokens by phase/, "report keeps a per-phase token table");
+  assert.match(f, /Timing by phase/, "report folds in per-phase timing");
+  assert.match(f, /^Artifacts$/m, "report lists artifacts");
+  // status-aware title, both variants
+  assert.match(f, /COMPLETE \(clean, no bugs found\)/, "clean title variant");
+  assert.match(f, /bugs found \(P0:/, "bugs title variant carries the P-breakdown");
+  // token honesty preserved from the old Token Report
+  assert.match(f, /Top consumers/, "top-consuming subagents listed");
+  assert.match(f, /lower bound/i, "partial coverage described as a lower bound");
+  assert.match(f, /Omit a phase row/i, "empty phases omitted, not zero-filled");
+  assert.match(f, /sums of the \*\*non-null\*\* values/i, "sums skip null entries");
+  // honesty lines ride under the stat header
+  assert.match(f, /!\s*Tokens are a lower bound/, "partial-token honesty line");
+  assert.match(f, /waves were not semantically verified/, "unverified-waves honesty line");
+  // it prints once at the terminal end -- the old per-step Token Report print is gone
+  assert.doesNotMatch(f, /full \*\*Token Report\*\* block/, "old per-step Token Report print removed");
 });
 
 test("README documents token accounting", () => {
