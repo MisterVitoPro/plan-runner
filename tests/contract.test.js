@@ -148,10 +148,17 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.8.3", "plugin version is current");
+  assert.equal(pkg.version, "1.9.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
+});
+
+test("README documents configurable verification coverage", () => {
+  const readme = read("README.md");
+  assert.match(readme, /--verify/, "README documents the --verify flag");
+  assert.match(readme, /\.plan-runner\.yml/, "README documents the config file");
+  assert.match(readme, /last-wave-only/, "README lists the verification modes");
 });
 
 test("SKILL tears down dev agents and the wave verifier after every wave (no idle agents)", () => {
