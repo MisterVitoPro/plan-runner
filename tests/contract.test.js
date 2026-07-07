@@ -335,6 +335,19 @@ test("SessionStart hook is self-contained (no CLAUDE_PLUGIN_ROOT, no script path
   assert.ok(hooks.hooks.SessionStart[0].hooks[0].timeout <= 10, "hook keeps a short timeout");
 });
 
+test("SKILL resolves a configurable verification mode (file + flag + default)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /per-agent/, "documents per-agent mode");
+  assert.match(f, /per-wave/, "documents per-wave mode");
+  assert.match(f, /last-wave-only/, "documents last-wave-only mode");
+  assert.match(f, /--verify/, "documents the --verify flag");
+  assert.match(f, /\.plan-runner\.yml/, "reads the .plan-runner.yml config file");
+  // precedence: flag > file > default
+  assert.match(f, /--verify[\s\S]{0,120}\.plan-runner\.yml[\s\S]{0,120}(default|per-wave)/i, "precedence flag > file > default");
+  assert.match(f, /default.{0,20}per-wave|per-wave.{0,20}default/i, "default is per-wave");
+  assert.match(f, /Resolve verification mode/i, "has a dedicated resolve-mode pre-flight step");
+});
+
 test("docs cover the Agent Teams backend", () => {
   const readme = read("README.md");
   assert.match(readme, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "README documents the agent-teams env var");

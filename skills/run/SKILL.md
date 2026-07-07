@@ -6,7 +6,7 @@ description: >
   agents, dispatch dev + verifier agents per wave, commit per wave, aggregate bugs at
   the end, and prompt to re-run with the generated fix-plan. Use when the user has a
   Markdown plan they want executed with built-in verification and bug-driven re-planning.
-argument-hint: "<path-to-plan.md> [--verbose] [--no-tdd] [--test-cmd \"<cmd>\"]"
+argument-hint: "<path-to-plan.md> [--verbose] [--no-tdd] [--test-cmd \"<cmd>\"] [--verify <mode>]"
 ---
 
 You are orchestrating a plan-runner pipeline cycle. The user's arguments are:
@@ -21,8 +21,9 @@ Tokenize `{$ARGUMENTS}` on whitespace. The first non-flag token is the plan path
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
+- `--verify <mode>` -- optional verification coverage mode: one of `per-agent`, `per-wave`, `last-wave-only`. Overrides `.plan-runner.yml`. When absent, the config file (or the `per-wave` default) decides. Capture its value as `verify_mode_flag` (unset if the flag is absent).
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Strip all flags before using the plan path.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Strip all flags (including `--verify <mode>`) before using the plan path.
 
 ## Timing
 
@@ -237,6 +238,31 @@ Re-run with --no-tdd to use the classic pipeline.
 **Capture the green baseline.** Run the full test command via Bash. Record the set of currently-failing test identifiers as `baseline_failing` (empty if the suite is green). If the suite is already red, print a warning that the baseline is not clean and that the listed failures will be subtracted when attributing new failures.
 
 Store the resolved command (both forms) and `baseline_failing` for the manifest `tdd` block.
+
+### 1d-quater. Resolve verification mode
+
+plan-runner's semantic-verifier coverage is configurable via `verify_mode`. Resolve it now, in precedence order:
+
+1. If `verify_mode_flag` is set (the `--verify <mode>` flag), use it.
+2. Otherwise, if a `.plan-runner.yml` file exists at the repo root, read it with the Read tool and use its `verification.mode` value. Extract that single key directly -- do NOT depend on a YAML parser being installed. A missing file, a missing `verification.mode` key, or an unreadable file falls through to the next step.
+3. Otherwise default to `per-wave`.
+
+Validate the resolved value against the set {`per-agent`, `per-wave`, `last-wave-only`}. If it is anything else, print and STOP:
+
+    Error: invalid verification mode "<value>".
+    Valid modes: per-agent, per-wave, last-wave-only.
+    Set it in .plan-runner.yml (verification.mode) or pass --verify <mode>.
+
+Print the resolved mode and its source:
+
+    Verification mode: <verify_mode> (from <--verify flag | .plan-runner.yml | default>).
+
+Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4b / Step 5.0 branching.
+
+`verify_mode` controls only the semantic verifier layer:
+- `per-wave` (default): one verifier per wave, every wave -- byte-for-byte the current behavior.
+- `per-agent`: one verifier per dev agent, every wave (highest scrutiny/cost).
+- `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4c) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
 
 ### 1e. Initialize manifest
 
