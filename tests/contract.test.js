@@ -161,7 +161,7 @@ test("SKILL tears down dev agents and the wave verifier after every wave (no idl
   assert.match(f, /every wave, not only the last one/i, "teardown must run wave by wave, not deferred to the end of the cycle");
   // the teardown step must precede the next dispatch point (verifier dispatch)
   assert.ok(
-    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Dispatch wave verifier"),
+    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Verify the wave"),
     "dev-agent teardown must happen before the wave verifier is dispatched"
   );
 });
@@ -369,4 +369,16 @@ test("docs cover the Agent Teams backend", () => {
   const readme = read("README.md");
   assert.match(readme, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "README documents the agent-teams env var");
   assert.match(readme, /2\.1\.178/, "README notes the Claude Code version requirement");
+});
+
+test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /verify_mode/, "Step 4b branches on verify_mode");
+  assert.match(f, /one verifier per dev agent/i, "per-agent = one verifier per dev agent");
+  assert.match(f, /last-wave-only[\s\S]{0,260}(final wave|last wave)/i, "last-wave-only verifies only the final wave");
+  assert.match(f, /"verifier_status":\s*"SKIPPED"/, "unverified waves are written SKIPPED");
+  // BLOCKED relayed by the orchestrator (not a verifier) on skipped waves, from declared status
+  assert.match(f, /BLOCKED[\s\S]{0,240}(declared|dev-reported|dev_status)[\s\S]{0,120}(P0|synthesize)/i, "BLOCKED relayed from dev status on skipped waves");
+  // per-agent verifier token label
+  assert.match(f, /wave-<W>-agent-<n>-verifier/, "per-agent verifiers get per-agent token labels");
 });
