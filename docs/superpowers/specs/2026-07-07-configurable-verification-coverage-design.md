@@ -62,6 +62,23 @@ runs byte-for-byte as it does today.
 
 The `plan-verifier` agent body is untouched in all four modes.
 
+### Edge cases
+
+- Single-wave plan (`W = 1`) with `last-wave-only`: wave 1 *is* the last wave, so
+  it is verified. `waves_skipped = 0` → no draft/banner. `last-wave-only` never
+  leaves a plan wholly unverified when it has exactly one wave.
+- `off` on any plan: every wave `SKIPPED`, `waves_verified = 0`, PR draft + banner.
+- **BLOCKED dev agents on a skipped wave.** The `BLOCKED → P0` bug is normally
+  synthesized *by the verifier* (`plan-verifier.md` step 1). On a `SKIPPED` wave no
+  verifier runs, so that synthesis would not happen. **Decision:** on a skipped
+  wave the orchestrator itself synthesizes the `BLOCKED → P0` bug from the dev
+  agent's own self-reported `dev_status` (a status the dev *declared*, not a
+  correctness judgment — so no self-verify violation) and writes it into
+  `bugs/wave-<W>.json`. Consequently a `SKIPPED` wave's `bugs` array is empty only
+  when no dev agent was BLOCKED; the wave `verifier_status` stays `SKIPPED`
+  regardless. This keeps a genuinely-stuck task from vanishing just because
+  verification was turned off.
+
 ## Config source and precedence
 
 - **File:** optional `.plan-runner.yml` at the target repo root (committed by the
