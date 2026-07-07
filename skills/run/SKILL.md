@@ -746,6 +746,8 @@ If cycle_n > 1, add a convergence hint:
 (This was cycle <cycle_n>. Cycle <cycle_n - 1> had <prior_total> bugs, this cycle has <current_total>.)
 ```
 
+If the previous cycle ran a different `verify_mode`, add: `(verification depth differed between cycles -- a lower bug count may reflect shallower verification, not real convergence.)` A drop in bugs across cycles is only meaningful when both cycles verified at the same depth.
+
 Read `prior_total` from the previous cycle's manifest.json if it exists.
 
 Then prompt:
@@ -769,12 +771,14 @@ You are executing the plan-runner:run skill in a fresh session.
 
 Invoke the Skill tool with:
   skill: "plan-runner:run"
-  args: "<absolute path to fix-plan.md>"
+  args: "<absolute path to fix-plan.md> --verify <verify_mode>"
 
 The fix-plan file already exists on disk. Read it fresh. Follow the skill exactly.
 
 When the skill completes, return a concise summary: cycle number, waves run, total bugs found, whether the user accepted another re-run, and the path to the cycle's bugs.md. Do not re-describe work the user already saw -- just the outcome.
 ```
+
+Carry the effective `verify_mode` forward explicitly (via `--verify`) so a `--verify` one-off does not silently revert to the committed `.plan-runner.yml` mode mid-loop, and the re-run's depth is a conscious, recorded choice. On the `teams` backend (in-place re-run), start the next cycle with the same `verify_mode` carried forward.
 
 Use absolute paths so the subagent's path resolution does not depend on shared working-directory state. When the subagent returns, print its summary verbatim and STOP.
 
@@ -791,13 +795,21 @@ plan-runner cycle <cycle_n> complete -- no bugs found.
 ==========================================================
 Waves: <W>
 Dev agents: <total dev agents>
-Wave verifiers: <W> (1 per wave)
+Wave verifiers: <waves_verified> of <W> waves (mode: <verify_mode>)
 Commits: <count of waves with non-null commit_sha>
 Duration: <total elapsed in Xm Ys>
 Tokens: <total_tokens> across <agents_reported>/<agents_total> subagents<if not complete: " (partial -- some subagents did not report usage)">
 
 Manifest: <path to manifest.json>
 ```
+
+When `verification.waves_skipped > 0`, append a line to the summary:
+
+```
+Note: <waves_skipped> of <W> waves were not semantically verified (mode: <verify_mode>) -- "no bugs found" means no issues in the verified waves, not a clean bill for the whole plan.
+```
+
+This keeps a reduced-coverage run from reading as fully verified-clean.
 
 Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
 

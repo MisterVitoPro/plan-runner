@@ -390,3 +390,13 @@ test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wa
   // per-agent verifier token label
   assert.match(f, /wave-<W>-agent-<n>-verifier/, "per-agent verifiers get per-agent token labels");
 });
+
+test("SKILL keeps 'clean' honest about verification depth", () => {
+  const f = read("skills/run/SKILL.md");
+  // the zero-bug summary must qualify itself when waves were skipped
+  assert.match(f, /waves_skipped[\s\S]{0,240}(not.{0,20}semantically verified|not.{0,20}verified)/i, "clean summary qualifies when waves were skipped");
+  // the re-run handoff carries the effective mode forward
+  assert.match(f, /--verify <verify_mode>|carry.{0,40}verify_mode[\s\S]{0,40}re-run/i, "re-run handoff carries the effective verify_mode");
+  // convergence hint acknowledges differing modes
+  assert.match(f, /different[\s\S]{0,40}verify_mode|verify_mode[\s\S]{0,60}(shallower|convergence)/i, "convergence hint notes differing verify_mode");
+});
