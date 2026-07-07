@@ -277,6 +277,7 @@ Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
   "context7_available": <bool>,
   "git_available": <bool>,
   "backend": "<backend>",
+  "verification": {"mode": "<verify_mode>", "waves_total": null, "waves_verified": 0, "waves_skipped": 0},
   "waves": [],
   "total_bugs": 0,
   "token_usage": null,
@@ -290,6 +291,8 @@ Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
   }
 }
 ```
+
+`verification.waves_total` is null at init (the wave count is not known until Step 2 analysis); set it to the total wave count once the wave plan is validated, and increment `waves_verified` / `waves_skipped` per wave in Step 4f.
 
 (When `tdd_enabled` is false, write `"tdd": {"enabled": false}` and omit the other keys.)
 

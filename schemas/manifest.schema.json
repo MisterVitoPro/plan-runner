@@ -12,6 +12,17 @@
     "context7_available": {"type": "boolean"},
     "git_available": {"type": "boolean", "description": "Whether git was available at pre-flight (git binary present AND inside a work tree). When false, all git operations are skipped: clean-tree check, per-wave commits, and the PR step. Optional for back-compat with manifests written before 1.3.0."},
     "backend": {"type": "string", "enum": ["teams", "subagent"], "description": "Wave-execution backend selected at pre-flight: 'teams' when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 and team tooling is present, else 'subagent'. Optional for back-compat with pre-1.0.0 manifests."},
+    "verification": {
+      "type": "object",
+      "description": "Verification coverage config + per-cycle coverage counters. 'mode' is the resolved verify_mode; 'waves_verified'/'waves_skipped' tally how many waves got a semantic verifier versus an honest SKIPPED (e.g. earlier waves under last-wave-only). Optional for back-compat with manifests written before 1.9.0 (absent => the pre-1.9.0 default of one verifier per wave, full coverage).",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["per-agent", "per-wave", "last-wave-only"]},
+        "waves_total": {"type": ["integer", "null"]},
+        "waves_verified": {"type": "integer"},
+        "waves_skipped": {"type": "integer"}
+      }
+    },
     "waves": {
       "type": "array",
       "items": {

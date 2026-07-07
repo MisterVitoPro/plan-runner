@@ -257,6 +257,23 @@ test("README documents the code-atlas sync", () => {
   assert.match(readme, /code-atlas:update|Code Atlas sync/i, "README documents the code-atlas sync");
 });
 
+test("manifest schema documents the verification coverage block", () => {
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  const v = schema.properties.verification;
+  assert.ok(v, "manifest schema must define verification");
+  assert.ok(v.properties.mode, "verification has a mode");
+  assert.deepEqual(
+    v.properties.mode.enum,
+    ["per-agent", "per-wave", "last-wave-only"],
+    "mode enum lists the three modes"
+  );
+  assert.ok(v.properties.waves_skipped, "verification tracks waves_skipped");
+  assert.ok(v.properties.waves_verified, "verification tracks waves_verified");
+  assert.match(JSON.stringify(v), /pre-1\.9\.0/, "verification notes pre-1.9.0 back-compat");
+  // must be optional (old manifests without it still validate)
+  assert.ok(!(schema.required || []).includes("verification"), "verification is optional");
+});
+
 test("manifest schema documents token_usage", () => {
   const schema = JSON.parse(read("schemas/manifest.schema.json"));
   assert.ok(schema.properties.token_usage, "manifest schema must define token_usage");
