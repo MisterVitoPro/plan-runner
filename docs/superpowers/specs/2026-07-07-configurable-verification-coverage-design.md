@@ -79,6 +79,29 @@ The `plan-verifier` agent body is untouched in all four modes.
   regardless. This keeps a genuinely-stuck task from vanishing just because
   verification was turned off.
 
+## TDD interaction
+
+`verify_mode` never touches test authoring. Test-author agents (`role:
+test-author`) are dev agents, always dispatched by the wave plan regardless of
+mode. What a verifier does in a TDD run is *judge* the red/green gate output — it
+never writes or runs tests (it is read-only and told "Do NOT run tests yourself").
+
+On a `SKIPPED` wave in a TDD run:
+
+- The orchestrator **still runs** the red/green gates (Step 4a-ter) via Bash and
+  records the raw `red_run` / `green_run` output in the manifest `tdd.tasks` exactly
+  as today — the objective pass/fail signal is cheap and worth keeping.
+- **No verifier adjudicates** that output, so no RED-validity / GREEN-satisfaction
+  bugs are synthesized for the wave, and `valid_red` stays `null` (the null already
+  means "not yet adjudicated," so no schema change).
+- The wave `verifier_status` is `SKIPPED`; the "invalid red → skip paired impl"
+  short-circuit in 4a-ter still fires on the orchestrator-detectable case (new
+  tests passed at exit 0) but not on the verifier-judged invalid-red case, since no
+  verifier runs.
+
+So a skipped TDD wave keeps its tests and their raw run results; it drops only the
+verifier's judgment of whether the red was genuine and the green complete.
+
 ## Config source and precedence
 
 - **File:** optional `.plan-runner.yml` at the target repo root (committed by the
