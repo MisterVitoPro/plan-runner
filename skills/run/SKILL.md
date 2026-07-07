@@ -771,7 +771,7 @@ Bug report:    <bugs.md path>
 Fix plan:      <fix-plan.md path>
 ```
 
-Then print the **Run Report** rendered per the "End-of-run Run Report" spec in the Token accounting section (stat header, honesty lines, per-phase token table, per-phase timing table, artifacts).
+Do NOT print the full Run Report here -- this block stays compact so the re-run decision is quick. On the `Y` handoff path the token/timing detail is deferred to the next cycle's Run Report and remains recorded in this cycle's `manifest.json`; on the `n` path the full Run Report prints at the terminal end (after the PR step).
 
 If cycle_n > 1, add a convergence hint:
 ```
@@ -816,34 +816,11 @@ Use absolute paths so the subagent's path resolution does not depend on shared w
 
 **Backend `teams`:** do NOT hand off to a fresh subagent -- a teammate cannot spawn its own team (no nested teams), and the lead is fixed for the session. Instead re-run **in place in the lead session**: re-enter this pipeline from Step 1 with the plan path set to the absolute `fix-plan.md` path (this starts a new cycle under the same date root). Carry the existing `backend = "teams"` forward. When that cycle completes, STOP.
 
-## Step 7: FINAL SUMMARY (clean run only)
+## Step 7: FINALIZE (clean run only)
 
 Reach this step ONLY when total_bugs == 0 (no aggregator dispatched, no re-run prompt).
 
-Print:
-
-```
-plan-runner cycle <cycle_n> complete -- no bugs found.
-==========================================================
-Waves: <W>
-Dev agents: <total dev agents>
-Wave verifiers: <waves_verified> of <W> waves (mode: <verify_mode>)
-Commits: <count of waves with non-null commit_sha>
-Duration: <total elapsed in Xm Ys>
-Tokens: <total_tokens> across <agents_reported>/<agents_total> subagents<if not complete: " (partial -- some subagents did not report usage)">
-
-Manifest: <path to manifest.json>
-```
-
-When `verification.waves_skipped > 0`, append a line to the summary:
-
-```
-Note: <waves_skipped> of <W> waves were not semantically verified (mode: <verify_mode>) -- "no bugs found" means no issues in the verified waves, not a clean bill for the whole plan.
-```
-
-This keeps a reduced-coverage run from reading as fully verified-clean.
-
-Then print the **Run Report** rendered per the "End-of-run Run Report" spec in the Token accounting section (stat header, honesty lines, per-phase token table, per-phase timing table, artifacts).
+Do not print a summary here. The clean-run summary now lives in the single End-of-run Run Report printed at the terminal end (its status-aware title reads `COMPLETE (clean, no bugs found)`, and the unverified-waves honesty line covers `verification.waves_skipped > 0`, so a reduced-coverage run still cannot read as fully verified-clean).
 
 Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 
@@ -911,7 +888,7 @@ Git not available -- skipping the PR step. Review the generated artifacts in the
 cycle directory: <cycle_dir>.
 ```
 
-Then proceed to the Phase Timing Summary and STOP. Do NOT invoke the `plan-runner:pr` skill.
+Then proceed to the End-of-run Run Report (terminal print) and STOP. Do NOT invoke the `plan-runner:pr` skill.
 
 Otherwise (git is available):
 
@@ -933,19 +910,10 @@ Invoke the Skill tool with:
 The `plan-runner:pr` skill reads `manifest.json`, `wave-plan.json`, and the bug JSONs
 from that directory, pushes the current branch, and creates or updates the pull
 request (conventional title, rich body, draft when bugs remain). When it returns,
-print its confirmation line verbatim and STOP.
+print its confirmation line verbatim, then proceed to the End-of-run Run Report (terminal print) and STOP.
 
-## Phase Timing Summary (always print before STOP unless STOP was an early-exit error)
+## End-of-run Run Report (terminal print)
 
-```
-Phase Timing:
-  Pre-flight       <Xm Ys>
-  Analyze plan     <Xm Ys>
-  User confirm     (excluded from total)
-  Wave execution   <Xm Ys>   (<W> waves)
-  Aggregation      <Xm Ys>   (skipped if 0 bugs)
-  Sync code atlas  <Xm Ys>   (skipped if git absent or code-atlas not present)
-  Open PR          <Xm Ys>
-  --------------------------------
-  Total            <Xm Ys>
-```
+Always reached as the last thing before a normal STOP (clean path, bugs-found `n` path, and git-absent path); never reached on the bugs-found `Y` handoff (that cycle STOPs after the handoff) or on an early-exit error STOP.
+
+Compute the per-phase durations from the timestamps recorded through the run (Pre-flight, Analyze plan, Wave execution, Aggregation, Sync code atlas, Open PR) and the `Total`, excluding the User-confirm wait. Then render and print the **End-of-run Run Report** exactly per its spec in the Token accounting section -- status-aware title, two-column stat header, honesty lines, `Tokens by phase` table, `Timing by phase` table (using the durations just computed), and the `Artifacts` block. Then STOP.

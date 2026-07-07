@@ -348,6 +348,19 @@ test("run skill renders a unified end-of-run Run Report", () => {
   assert.doesNotMatch(f, /full \*\*Token Report\*\* block/, "old per-step Token Report print removed");
 });
 
+test("Run Report prints once at the terminal end, not per step", () => {
+  const f = read("skills/run/SKILL.md");
+  // a single terminal print section exists
+  assert.match(f, /## End-of-run Run Report \(terminal print\)/, "terminal print section exists");
+  // the old standalone timing section is gone
+  assert.doesNotMatch(f, /## Phase Timing Summary/, "standalone Phase Timing Summary removed");
+  // Step 6 keeps the compact decision block but not the full report
+  assert.match(f, /\[Phase 4\/4\] Bug Report/, "Step 6 keeps the compact bug decision block");
+  assert.doesNotMatch(f, /"End-of-run Token Report" spec/, "no lingering reference to the old Token Report spec name");
+  // clean run defers its summary to the terminal report
+  assert.match(f, /Step 7: FINALIZE \(clean run only\)/, "Step 7 finalizes rather than printing a summary");
+});
+
 test("README documents token accounting", () => {
   const readme = read("README.md");
   assert.match(readme, /## Token accounting/, "README has a token accounting section");
