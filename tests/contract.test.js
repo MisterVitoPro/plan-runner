@@ -400,3 +400,11 @@ test("SKILL keeps 'clean' honest about verification depth", () => {
   // convergence hint acknowledges differing modes
   assert.match(f, /different[\s\S]{0,40}verify_mode|verify_mode[\s\S]{0,60}(shallower|convergence)/i, "convergence hint notes differing verify_mode");
 });
+
+test("pr skill drafts + banners when waves were left unverified", () => {
+  const f = read("skills/pr/SKILL.md");
+  assert.match(f, /verification/, "pr skill reads the verification block");
+  assert.match(f, /waves_skipped/, "pr skill checks waves_skipped");
+  assert.match(f, /draft[\s\S]{0,160}waves_skipped|waves_skipped[\s\S]{0,160}draft/i, "skipped waves force a draft PR");
+  assert.match(f, /not semantically verified|not verified/i, "PR body banners the unverified waves");
+});
