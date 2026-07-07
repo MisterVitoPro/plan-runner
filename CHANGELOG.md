@@ -2,6 +2,12 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.9.0 - 2026-07-07
+
+- **Configurable verification coverage.** A new `verify_mode` dial controls how many waves get a semantic verifier: `per-agent` (one verifier per dev agent, every wave), `per-wave` (one per wave, every wave -- the default and previous behavior), or `last-wave-only` (verify only the final wave). Set it in a committed `.plan-runner.yml` (`verification.mode`) or per-run with `--verify <mode>`; precedence is flag > file > default.
+- **Honest reduced coverage.** Waves left unverified by a lower mode are recorded `SKIPPED` -- a deliberate, transparent absence distinct from `UNVERIFIABLE` (a *requested* verdict that never landed, still a tracked bug). BLOCKED dev agents on a SKIPPED wave still surface a P0, relayed by the orchestrator from the dev's own declared status (no self-verify). The coverage gate leaves SKIPPED alone but still backfills UNVERIFIABLE for an in-scope missing verdict, so a PR still cannot open while a requested verdict is outstanding.
+- **Depth-honest surfacing.** The zero-bug summary and cross-cycle convergence hint no longer read as fully verified-clean when waves were skipped; the auto-re-run carries the effective mode forward; and the PR opens as a **draft** with a `[!WARNING]` verification banner whenever any wave was left unverified. The manifest gains an optional `verification` block (`mode` + coverage counters).
+
 ## 1.8.3 - 2026-07-04
 
 - **Fix release automation: tag step had no git identity.** The `marketplace-pin` workflow created an annotated tag (`git tag -a`) without configuring a committer identity on the runner, so the tag step failed with `empty ident name` and the marketplace pin never ran (caught by the first live release, v1.8.2). It now sets the `github-actions[bot]` identity before tagging.

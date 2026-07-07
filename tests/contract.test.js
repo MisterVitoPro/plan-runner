@@ -130,6 +130,14 @@ test("SKILL has a verifier-coverage gate before aggregation", () => {
   assert.match(f, /structurally impossible to reach the PR|PR.{0,40}(outstanding|while a verifier)/i, "gate must block opening a PR while a verdict is outstanding");
 });
 
+test("coverage gate treats SKIPPED as intentional, distinct from UNVERIFIABLE", () => {
+  const f = read("skills/run/SKILL.md");
+  // SKIPPED is a present, non-null status -> not backfilled, not a bug
+  assert.match(f, /SKIPPED[\s\S]{0,240}(does NOT backfill|not.{0,20}backfill|not.{0,25}treat it as a bug)/i, "SKIPPED waves are not backfilled as bugs");
+  // in-scope-but-missing verdict still becomes UNVERIFIABLE
+  assert.match(f, /in scope for a semantic verifier[\s\S]{0,160}UNVERIFIABLE|UNVERIFIABLE[\s\S]{0,200}(missing|null)/i, "in-scope missing verdict still becomes UNVERIFIABLE");
+});
+
 test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "must read the agent-teams env var");
@@ -140,10 +148,17 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.8.3", "plugin version is current");
+  assert.equal(pkg.version, "1.9.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
+});
+
+test("README documents configurable verification coverage", () => {
+  const readme = read("README.md");
+  assert.match(readme, /--verify/, "README documents the --verify flag");
+  assert.match(readme, /\.plan-runner\.yml/, "README documents the config file");
+  assert.match(readme, /last-wave-only/, "README lists the verification modes");
 });
 
 test("SKILL tears down dev agents and the wave verifier after every wave (no idle agents)", () => {
@@ -161,7 +176,7 @@ test("SKILL tears down dev agents and the wave verifier after every wave (no idl
   assert.match(f, /every wave, not only the last one/i, "teardown must run wave by wave, not deferred to the end of the cycle");
   // the teardown step must precede the next dispatch point (verifier dispatch)
   assert.ok(
-    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Dispatch wave verifier"),
+    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Verify the wave"),
     "dev-agent teardown must happen before the wave verifier is dispatched"
   );
 });
@@ -257,6 +272,23 @@ test("README documents the code-atlas sync", () => {
   assert.match(readme, /code-atlas:update|Code Atlas sync/i, "README documents the code-atlas sync");
 });
 
+test("manifest schema documents the verification coverage block", () => {
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  const v = schema.properties.verification;
+  assert.ok(v, "manifest schema must define verification");
+  assert.ok(v.properties.mode, "verification has a mode");
+  assert.deepEqual(
+    v.properties.mode.enum,
+    ["per-agent", "per-wave", "last-wave-only"],
+    "mode enum lists the three modes"
+  );
+  assert.ok(v.properties.waves_skipped, "verification tracks waves_skipped");
+  assert.ok(v.properties.waves_verified, "verification tracks waves_verified");
+  assert.match(JSON.stringify(v), /pre-1\.9\.0/, "verification notes pre-1.9.0 back-compat");
+  // must be optional (old manifests without it still validate)
+  assert.ok(!(schema.required || []).includes("verification"), "verification is optional");
+});
+
 test("manifest schema documents token_usage", () => {
   const schema = JSON.parse(read("schemas/manifest.schema.json"));
   assert.ok(schema.properties.token_usage, "manifest schema must define token_usage");
@@ -335,8 +367,51 @@ test("SessionStart hook is self-contained (no CLAUDE_PLUGIN_ROOT, no script path
   assert.ok(hooks.hooks.SessionStart[0].hooks[0].timeout <= 10, "hook keeps a short timeout");
 });
 
+test("SKILL resolves a configurable verification mode (file + flag + default)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /per-agent/, "documents per-agent mode");
+  assert.match(f, /per-wave/, "documents per-wave mode");
+  assert.match(f, /last-wave-only/, "documents last-wave-only mode");
+  assert.match(f, /--verify/, "documents the --verify flag");
+  assert.match(f, /\.plan-runner\.yml/, "reads the .plan-runner.yml config file");
+  // precedence: flag > file > default
+  assert.match(f, /--verify[\s\S]{0,120}\.plan-runner\.yml[\s\S]{0,120}(default|per-wave)/i, "precedence flag > file > default");
+  assert.match(f, /default.{0,20}per-wave|per-wave.{0,20}default/i, "default is per-wave");
+  assert.match(f, /Resolve verification mode/i, "has a dedicated resolve-mode pre-flight step");
+});
+
 test("docs cover the Agent Teams backend", () => {
   const readme = read("README.md");
   assert.match(readme, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "README documents the agent-teams env var");
   assert.match(readme, /2\.1\.178/, "README notes the Claude Code version requirement");
+});
+
+test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /verify_mode/, "Step 4b branches on verify_mode");
+  assert.match(f, /one verifier per dev agent/i, "per-agent = one verifier per dev agent");
+  assert.match(f, /last-wave-only[\s\S]{0,260}(final wave|last wave)/i, "last-wave-only verifies only the final wave");
+  assert.match(f, /"verifier_status":\s*"SKIPPED"/, "unverified waves are written SKIPPED");
+  // BLOCKED relayed by the orchestrator (not a verifier) on skipped waves, from declared status
+  assert.match(f, /BLOCKED[\s\S]{0,240}(declared|dev-reported|dev_status)[\s\S]{0,120}(P0|synthesize)/i, "BLOCKED relayed from dev status on skipped waves");
+  // per-agent verifier token label
+  assert.match(f, /wave-<W>-agent-<n>-verifier/, "per-agent verifiers get per-agent token labels");
+});
+
+test("SKILL keeps 'clean' honest about verification depth", () => {
+  const f = read("skills/run/SKILL.md");
+  // the zero-bug summary must qualify itself when waves were skipped
+  assert.match(f, /waves_skipped[\s\S]{0,240}(not.{0,20}semantically verified|not.{0,20}verified)/i, "clean summary qualifies when waves were skipped");
+  // the re-run handoff carries the effective mode forward
+  assert.match(f, /--verify <verify_mode>|carry.{0,40}verify_mode[\s\S]{0,40}re-run/i, "re-run handoff carries the effective verify_mode");
+  // convergence hint acknowledges differing modes
+  assert.match(f, /different[\s\S]{0,40}verify_mode|verify_mode[\s\S]{0,60}(shallower|convergence)/i, "convergence hint notes differing verify_mode");
+});
+
+test("pr skill drafts + banners when waves were left unverified", () => {
+  const f = read("skills/pr/SKILL.md");
+  assert.match(f, /verification/, "pr skill reads the verification block");
+  assert.match(f, /waves_skipped/, "pr skill checks waves_skipped");
+  assert.match(f, /draft[\s\S]{0,160}waves_skipped|waves_skipped[\s\S]{0,160}draft/i, "skipped waves force a draft PR");
+  assert.match(f, /not semantically verified|not verified/i, "PR body banners the unverified waves");
 });

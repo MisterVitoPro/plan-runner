@@ -49,6 +49,10 @@ count), and `token_usage` (may be absent on pre-1.5.0 manifests, or null).
 Read `$cycle_dir/wave-plan.json` for the per-agent `task_title` values (used for the
 Summary section). If it is missing, fall back to an empty task list.
 
+Also capture `verification` (may be absent on pre-1.9.0 manifests, or null). When
+absent, treat it as `{"mode": "per-wave", "waves_total": <wave count>, "waves_verified":
+<wave count>, "waves_skipped": 0}` -- i.e. full coverage.
+
 ## Step 2: Resolve branches and guard
 
 Run:
@@ -110,7 +114,14 @@ Sum column 1 (insertions) and column 2 (deletions) across all rows for totals; c
 the rows for files-changed; keep the up-to-10 rows with the largest (ins+del) as the
 "most-changed files" list (path with `+ins/-del`).
 
-Assemble the body as Markdown (no "Test plan" section):
+Assemble the body as Markdown (no "Test plan" section). When `verification.waves_skipped
+> 0`, prepend these lines as the FIRST lines of the body, before `## Summary`:
+
+```
+> [!WARNING]
+> Verification: <verification.mode> -- <verification.waves_skipped> of
+> <verification.waves_total> waves not semantically verified.
+```
 
 ```
 ## Summary
@@ -145,10 +156,16 @@ subagent was dispatched in it (e.g. aggregate on a zero-bug run).
 Omit the `Tokens:` line (and its `By phase` sub-bullet) entirely when `token_usage`
 is absent or null (pre-1.5.0 manifests, or a run where no figure was captured).
 
+Omit the verification banner entirely when `verification.waves_skipped` is 0 (full
+coverage -- nothing to warn about).
+
 ## Step 6: Decide draft state
 
-If `total_bugs > 0`, the PR should be a **draft** (unresolved bugs remain).
-Otherwise it is **ready for review**. Set `want_draft = (total_bugs > 0)`.
+Set `want_draft = (total_bugs > 0) OR (verification.waves_skipped > 0)`. Unresolved
+bugs OR any wave left unverified (a reduced `verify_mode`) makes the PR a **draft**;
+only a run with zero bugs AND full semantic coverage opens **ready for review**. A
+reduced-coverage run opens as a draft even with zero bugs -- the work is not fully
+verified.
 
 ## Step 7: Create or update the PR
 

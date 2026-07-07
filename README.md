@@ -123,6 +123,34 @@ points you to `--no-tdd`.
 - `--no-tdd` -- disable TDD and run the classic (non-TDD) pipeline (TDD is on by default).
 - `--test-cmd "<cmd>"` -- supply the test command explicitly; use `{file}` for
   single-file runs (e.g. `pytest {file}`).
+- `--verify <mode>` -- verification coverage: `per-agent`, `per-wave` (default), or
+  `last-wave-only`. Overrides `.plan-runner.yml`.
+
+## Verification coverage
+
+plan-runner verifies each wave with a read-only verifier agent. How much
+verification runs is configurable via `verify_mode`:
+
+- `per-agent` -- one verifier per dev agent, every wave (highest scrutiny, most tokens).
+- `per-wave` -- one verifier per wave, every wave. **Default**; the historical behavior.
+- `last-wave-only` -- one verifier on the final wave only; earlier waves are recorded
+  `SKIPPED`. The cheapest mode.
+
+Set it persistently in a committed `.plan-runner.yml` at the repo root:
+
+```yaml
+verification:
+  mode: per-wave   # per-agent | per-wave | last-wave-only
+```
+
+or per-run with `--verify <mode>` (which overrides the file). Precedence:
+`--verify` flag > `.plan-runner.yml` > default (`per-wave`).
+
+`SKIPPED` is an intentional, transparent absence -- distinct from `UNVERIFIABLE`
+(a *requested* verdict that never landed, still routed through the fix-plan loop).
+A BLOCKED dev agent on a skipped wave still surfaces a P0. Any run that leaves
+waves unverified opens its PR as a **draft** with a warning banner, and the
+"no bugs found" summary says so -- reduced coverage never masquerades as a clean bill.
 
 ## Code Atlas sync
 

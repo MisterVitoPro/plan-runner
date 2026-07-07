@@ -6,7 +6,7 @@ description: >
   agents, dispatch dev + verifier agents per wave, commit per wave, aggregate bugs at
   the end, and prompt to re-run with the generated fix-plan. Use when the user has a
   Markdown plan they want executed with built-in verification and bug-driven re-planning.
-argument-hint: "<path-to-plan.md> [--verbose] [--no-tdd] [--test-cmd \"<cmd>\"]"
+argument-hint: "<path-to-plan.md> [--verbose] [--no-tdd] [--test-cmd \"<cmd>\"] [--verify <mode>]"
 ---
 
 You are orchestrating a plan-runner pipeline cycle. The user's arguments are:
@@ -21,8 +21,9 @@ Tokenize `{$ARGUMENTS}` on whitespace. The first non-flag token is the plan path
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
+- `--verify <mode>` -- optional verification coverage mode: one of `per-agent`, `per-wave`, `last-wave-only`. Overrides `.plan-runner.yml`. When absent, the config file (or the `per-wave` default) decides. Capture its value as `verify_mode_flag` (unset if the flag is absent).
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Strip all flags before using the plan path.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Strip all flags (including `--verify <mode>`) before using the plan path.
 
 ## Timing
 
@@ -238,6 +239,31 @@ Re-run with --no-tdd to use the classic pipeline.
 
 Store the resolved command (both forms) and `baseline_failing` for the manifest `tdd` block.
 
+### 1d-quater. Resolve verification mode
+
+plan-runner's semantic-verifier coverage is configurable via `verify_mode`. Resolve it now, in precedence order:
+
+1. If `verify_mode_flag` is set (the `--verify <mode>` flag), use it.
+2. Otherwise, if a `.plan-runner.yml` file exists at the repo root, read it with the Read tool and use its `verification.mode` value. Extract that single key directly -- do NOT depend on a YAML parser being installed. A missing file, a missing `verification.mode` key, or an unreadable file falls through to the next step.
+3. Otherwise default to `per-wave`.
+
+Validate the resolved value against the set {`per-agent`, `per-wave`, `last-wave-only`}. If it is anything else, print and STOP:
+
+    Error: invalid verification mode "<value>".
+    Valid modes: per-agent, per-wave, last-wave-only.
+    Set it in .plan-runner.yml (verification.mode) or pass --verify <mode>.
+
+Print the resolved mode and its source:
+
+    Verification mode: <verify_mode> (from <--verify flag | .plan-runner.yml | default>).
+
+Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4b / Step 5.0 branching.
+
+`verify_mode` controls only the semantic verifier layer:
+- `per-wave` (default): one verifier per wave, every wave -- byte-for-byte the current behavior.
+- `per-agent`: one verifier per dev agent, every wave (highest scrutiny/cost).
+- `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4c) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
+
 ### 1e. Initialize manifest
 
 Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
@@ -251,6 +277,7 @@ Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
   "context7_available": <bool>,
   "git_available": <bool>,
   "backend": "<backend>",
+  "verification": {"mode": "<verify_mode>", "waves_total": null, "waves_verified": 0, "waves_skipped": 0},
   "waves": [],
   "total_bugs": 0,
   "token_usage": null,
@@ -264,6 +291,8 @@ Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
   }
 }
 ```
+
+`verification.waves_total` is null at init (the wave count is not known until Step 2 analysis); set it to the total wave count once the wave plan is validated, and increment `waves_verified` / `waves_skipped` per wave in Step 4f.
 
 (When `tdd_enabled` is false, write `"tdd": {"enabled": false}` and omit the other keys.)
 
@@ -346,8 +375,10 @@ Non-testable tasks (will run without a test gate):
   - <task_title>: <non_testable_reason>     (one line per standalone task with a reason)
 
 Uncovered plan sections: <sections or "none">
-Estimated total agents: <total_dev + <W> verifiers + 2 (analyzer + aggregator)>
+Estimated total agents: <total_dev + <verifier_count> verifiers + 2 (analyzer + aggregator)>
 ```
+
+`<verifier_count>` depends on `verify_mode`: `per-agent` -> the total dev-agent count (one verifier each); `per-wave` -> `<W>` (one per wave); `last-wave-only` -> `1` (final wave only). Also set `verification.waves_total = <W>` in the manifest now that the wave count is known.
 
 If `uncovered_plan_sections` is non-empty, print a warning that those sections will not be executed and the user can re-run with a revised plan after this cycle completes.
 
@@ -456,68 +487,85 @@ Gates are applied **per agent**, by `role`, because a single wave may mix test-a
 
 **Invalid red (paired impl skipped):** if the red gate shows the new tests PASSED (exit 0 -- the orchestrator detects this directly) OR the red-gate verifier judged the red invalid (syntax / collection error), do NOT dispatch the paired impl agent -- mark it BLOCKED with reason "paired test red gate invalid" and set `valid_red: false` for that task in the manifest. The verifier still emits the P1 bug from the captured output, which flows to the next cycle.
 
-### 4b. Dispatch wave verifier (single agent, background)
+### 4b. Verify the wave (coverage per `verify_mode`)
 
 Print:
-```
-[Wave <W>] All dev agents complete. Dispatching wave verifier...
-```
 
-Dispatch ONE verifier for the entire wave via the **registered subagent type `plan-runner:plan-verifier`** (do NOT inline the agent file). On the `teams` backend this may be a teammate or a plain subagent; either way reference the type rather than inlining. Include all dev agents' data in the per-invocation prompt:
+    [Wave <W>] All dev agents complete. Verifying (mode: <verify_mode>)...
 
-```
-You are being deployed as the wave verifier for plan-runner cycle <cycle_n>, wave <W>.
+Whether this wave gets a semantic verifier depends on `verify_mode` (resolved in Step 1d-quater):
+- `per-wave` (default): yes -- one verifier for the whole wave.
+- `per-agent`: yes -- one verifier per dev agent.
+- `last-wave-only`: only if this is the final wave (`W == total_W`). For any earlier wave, do NOT dispatch a verifier -- jump to "Unverified wave (SKIPPED)" below.
 
-wave_id: <W>
+**Dispatch a semantic verifier** via the registered subagent type `plan-runner:plan-verifier` (do NOT inline the agent file). Use `model: sonnet`. Build the per-invocation prompt with the `AGENTS IN THIS WAVE` block, varying only by mode:
+- `per-wave`, and the final wave under `last-wave-only`: include ALL dev agents in ONE verifier's `AGENTS IN THIS WAVE` block (the original single-verifier behavior).
+- `per-agent`: dispatch N verifiers, one per dev agent, each with a single-agent `AGENTS IN THIS WAVE` block containing only that agent. Label each `wave-<W>-agent-<n>-verifier`.
 
-AGENTS IN THIS WAVE:
-<for each dev agent, repeat this block:>
----
-agent_id: <agent_id>
-task_title: <task_title>
-acceptance_criteria:
-<acceptance_criteria as bulleted list>
+The per-invocation prompt (unchanged from the single-verifier form, repeated per agent for `per-agent`):
 
-OWNED FILES (the dev agent was allowed to write these):
-<owned_files joined with newlines>
+    You are being deployed as the wave verifier for plan-runner cycle <cycle_n>, wave <W>.
 
-DEV AGENT REPORTED:
-- status: <dev_status>
-- files_written: <dev's files_written joined with newlines>
-- files_unexpectedly_modified: <dev's files_unexpectedly_modified joined with newlines>
-- concerns: <dev's concerns joined with newlines>
-- role: <agent role or "standalone">
-- tests_to_satisfy: <impl only: tests_to_satisfy joined with newlines, else "n/a">
-- captured_test_output: |
-  <verbatim gate output captured in 4a-ter, or "n/a" for standalone/classic>
----
-<end repeat>
+    wave_id: <W>
 
-Return only the JSON bug report, nothing else.
-```
+    AGENTS IN THIS WAVE:
+    <for each dev agent in scope for this verifier, repeat the block:>
+    ---
+    agent_id: <agent_id>
+    task_title: <task_title>
+    acceptance_criteria:
+    <acceptance_criteria as bulleted list>
 
-Use `model: sonnet`.
+    OWNED FILES (the dev agent was allowed to write these):
+    <owned_files joined with newlines>
 
-**Wait for the verifier to complete (backend-aware).** The verdict must come from the verifier's own report -- never from the orchestrator's own reading of the code:
+    DEV AGENT REPORTED:
+    - status: <dev_status>
+    - files_written: <dev's files_written joined with newlines>
+    - files_unexpectedly_modified: <dev's files_unexpectedly_modified joined with newlines>
+    - concerns: <dev's concerns joined with newlines>
+    - role: <agent role or "standalone">
+    - tests_to_satisfy: <impl only: tests_to_satisfy joined with newlines, else "n/a">
+    - captured_test_output: |
+      <verbatim gate output captured in 4a-ter, or "n/a" for standalone/classic>
+    ---
+    <end repeat>
 
-**Backend `subagent` (default):** dispatch the verifier as a background task and wait for its completion notification. Collect its return JSON.
+    Return only the JSON bug report, nothing else.
 
-**Backend `teams`:** the verifier runs as a teammate (or a plain subagent referencing the type). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Instead **deterministically poll the verifier's task result / mailbox** with a generous bounded wait, re-reading the task result until the verifier's bug-report JSON (its final message) is actually retrieved. Read the verdict *from the task result*, not by inferring it.
+**Wait for the verifier(s) to complete (backend-aware).** For `per-agent`, wait for ALL N verifiers. The verdict must come from each verifier's own report -- never from the orchestrator's own reading of the code:
 
-**No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for the verifier's report, and MUST NOT advance to 4c / 4e / Step 5 / Step 8 until the verifier's report is in hand. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: mark the wave `verifier_status = UNVERIFIABLE` (use the 4c synthetic-bug fallback) so the gap flows through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
+**Backend `subagent` (default):** dispatch each verifier as a background task and wait for its completion notification. Collect each return JSON.
+
+**Backend `teams`:** each verifier runs as a teammate (or a plain subagent referencing the type). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Deterministically poll the verifier's task result / mailbox with a generous bounded wait, re-reading each until the bug-report JSON (its final message) is retrieved. Read the verdict from the task result, not by inferring it.
+
+**No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for a verifier's report, and MUST NOT advance to 4c / 4e / Step 5 / Step 8 until every dispatched verifier's report is in hand. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: the missing verdict flows into 4c as `UNVERIFIABLE` so the gap routes through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
+
+**Unverified wave (SKIPPED).** When `verify_mode` leaves this wave without a semantic verifier (an earlier wave under `last-wave-only`), dispatch no verifier. The orchestrator writes the wave's bug JSON directly in 4c with `verifier_status: "SKIPPED"`, synthesizing only the BLOCKED bugs from dev-reported status:
+- For each dev agent whose declared `dev_status` is `BLOCKED`, synthesize the same P0 `missing_requirement` bug the verifier would (per plan-verifier.md step 1): `title` = `Dev agent BLOCKED: <first concern or 'no reason given'>`, `file` = `<owned_files[0] or 'n/a'>`, `line` = null, `evidence` = "Dev agent could not complete the task", `expected` = "Dev agent should complete all acceptance criteria", `suggested_fix` = `<concerns joined or 'investigate why agent was blocked'>`. This is relayed from the dev's own declared `dev_status`, not a correctness judgment of code -- so it does not violate the No-self-verify rule.
+- Every other agent on a SKIPPED wave gets no bug: its code is deliberately not semantically verified in this mode.
 
 ### 4c. Write bug JSON
 
-Parse the verifier's return. If parse fails, synthesize:
+Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
+
+**Single-verifier waves (`per-wave`, or the final wave under `last-wave-only`):** parse the verifier's return. If parse fails, synthesize:
 ```json
 {"wave_id": <W>, "verifier_status": "UNVERIFIABLE", "agent_statuses": {}, "bugs": [{"bug_id": "wave-<W>-bug-1", "severity": "P2", "category": "incorrect_implementation", "title": "Wave verifier returned non-JSON output", "file": "n/a", "line": null, "evidence": "<truncated raw output>", "expected": "Valid JSON bug report", "suggested_fix": "Re-run verification manually"}]}
 ```
 
+**Per-agent waves (`per-agent`):** parse each of the N verifier returns (apply the same synthetic UNVERIFIABLE fallback per verifier that fails to parse). Merge into one wave JSON: `bugs` = the union of every verifier's bugs; `agent_statuses` = each agent's own verdict from its verifier; `verifier_status` = `CLEAN` if all agents are clean, `BUGS_FOUND` if any agent has bugs, `UNVERIFIABLE` if any per-agent verifier's report was missing or unparseable.
+
+**Unverified (SKIPPED) waves:** write
+```json
+{"wave_id": <W>, "verifier_status": "SKIPPED", "agent_statuses": {"<each agent_id>": "BUGS_FOUND if that agent's dev_status is BLOCKED else SKIPPED"}, "bugs": ["<the BLOCKED bugs synthesized in 4b, may be empty>"]}
+```
+
 Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
 
-Capture the verifier's token usage (see **Token accounting**), store it as the wave's `verifier_tokens`, and append it to `token_usage.by_agent` as `{"agent": "wave-<W>-verifier", "phase": "verify", ...}`.
+Capture each dispatched verifier's token usage (see **Token accounting**). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
 
-**Tear down the wave verifier.** Its report is now captured -- release it the same way as the dev agents in 4a-bis: `TaskStop` on its background `task_id` (subagent backend) or its teammate agent ID / name (teams backend). Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, or `UNVERIFIABLE`) -- an unverifiable run still leaves a process to release.
+**Tear down the wave verifier(s).** Each dispatched verifier's report is now captured -- release it the same way as the dev agents in 4a-bis: `TaskStop` on its background `task_id` (subagent backend) or its teammate agent ID / name (teams backend). For a `per-agent` wave, tear down every verifier. A SKIPPED wave has no verifier to tear down. Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, `UNVERIFIABLE`, or `SKIPPED`).
 
 ### 4d. Render wave dashboard
 
@@ -538,6 +586,8 @@ Wave tokens: <wave_token_total or "n/a"> (<reported>/<dispatched> agents reporte
 ```
 
 `wave_token_total` is the sum of every non-null per-agent and verifier `total` in this wave; print `n/a` when nothing was reported. `<reported>/<dispatched>` is how many of this wave's subagents (dev agents + verifier) surfaced a usage figure.
+
+For a SKIPPED wave (unverified under `verify_mode`), the "Wave verifier" line prints `SKIPPED` and "Total bugs" counts only any BLOCKED-derived bugs. For a `per-agent` wave, "Wave verifier" prints the merged wave `verifier_status` and each agent's own verdict appears in the "Status per agent" column.
 
 ### 4e. Commit the wave
 
@@ -602,6 +652,8 @@ Append a wave entry to `$cycle_dir/manifest.json`:
 }
 ```
 
+The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the top-level `verification` counters: increment `waves_verified` when this wave got a semantic verifier, or `waves_skipped` when it was SKIPPED. Ensure `verification.waves_total` is set to the total wave count.
+
 Use Read+Write or jq to update the manifest in place. If jq is unavailable, read the JSON, mutate it in memory, write it back.
 
 Record `t_wave_<W>_end = $(date +%s)`.
@@ -621,6 +673,8 @@ If any wave's bug JSON is missing or has a null `verifier_status`, the verifier 
 ```
 
 Print a warning naming each backfilled wave. This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict is still outstanding.
+
+A wave whose bug JSON carries `verifier_status: "SKIPPED"` was intentionally left unverified by `verify_mode` (e.g. an earlier wave under `last-wave-only`). `SKIPPED` is a present, non-null status, so this gate does NOT backfill it and does NOT treat it as a bug. The gate still backfills `UNVERIFIABLE` for any wave that was in scope for a semantic verifier but whose `bugs/wave-<W>.json` is missing or has a null `verifier_status` -- a dispatched verifier that never landed is still a tracked gap, exactly as before. So the "structurally impossible to open a PR while a requested verdict is outstanding" guarantee holds, while an intentional skip stays honest rather than masquerading as clean.
 
 ### 5.1. Count and aggregate
 
@@ -692,6 +746,8 @@ If cycle_n > 1, add a convergence hint:
 (This was cycle <cycle_n>. Cycle <cycle_n - 1> had <prior_total> bugs, this cycle has <current_total>.)
 ```
 
+If the previous cycle ran a different `verify_mode`, add: `(verification depth differed between cycles -- a lower bug count may reflect shallower verification, not real convergence.)` A drop in bugs across cycles is only meaningful when both cycles verified at the same depth.
+
 Read `prior_total` from the previous cycle's manifest.json if it exists.
 
 Then prompt:
@@ -715,12 +771,14 @@ You are executing the plan-runner:run skill in a fresh session.
 
 Invoke the Skill tool with:
   skill: "plan-runner:run"
-  args: "<absolute path to fix-plan.md>"
+  args: "<absolute path to fix-plan.md> --verify <verify_mode>"
 
 The fix-plan file already exists on disk. Read it fresh. Follow the skill exactly.
 
 When the skill completes, return a concise summary: cycle number, waves run, total bugs found, whether the user accepted another re-run, and the path to the cycle's bugs.md. Do not re-describe work the user already saw -- just the outcome.
 ```
+
+Carry the effective `verify_mode` forward explicitly (via `--verify`) so a `--verify` one-off does not silently revert to the committed `.plan-runner.yml` mode mid-loop, and the re-run's depth is a conscious, recorded choice. On the `teams` backend (in-place re-run), start the next cycle with the same `verify_mode` carried forward.
 
 Use absolute paths so the subagent's path resolution does not depend on shared working-directory state. When the subagent returns, print its summary verbatim and STOP.
 
@@ -737,13 +795,21 @@ plan-runner cycle <cycle_n> complete -- no bugs found.
 ==========================================================
 Waves: <W>
 Dev agents: <total dev agents>
-Wave verifiers: <W> (1 per wave)
+Wave verifiers: <waves_verified> of <W> waves (mode: <verify_mode>)
 Commits: <count of waves with non-null commit_sha>
 Duration: <total elapsed in Xm Ys>
 Tokens: <total_tokens> across <agents_reported>/<agents_total> subagents<if not complete: " (partial -- some subagents did not report usage)">
 
 Manifest: <path to manifest.json>
 ```
+
+When `verification.waves_skipped > 0`, append a line to the summary:
+
+```
+Note: <waves_skipped> of <W> waves were not semantically verified (mode: <verify_mode>) -- "no bugs found" means no issues in the verified waves, not a clean bill for the whole plan.
+```
+
+This keeps a reduced-coverage run from reading as fully verified-clean.
 
 Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
 
