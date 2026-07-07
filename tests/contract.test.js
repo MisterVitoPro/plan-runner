@@ -130,6 +130,14 @@ test("SKILL has a verifier-coverage gate before aggregation", () => {
   assert.match(f, /structurally impossible to reach the PR|PR.{0,40}(outstanding|while a verifier)/i, "gate must block opening a PR while a verdict is outstanding");
 });
 
+test("coverage gate treats SKIPPED as intentional, distinct from UNVERIFIABLE", () => {
+  const f = read("skills/run/SKILL.md");
+  // SKIPPED is a present, non-null status -> not backfilled, not a bug
+  assert.match(f, /SKIPPED[\s\S]{0,240}(does NOT backfill|not.{0,20}backfill|not.{0,25}treat it as a bug)/i, "SKIPPED waves are not backfilled as bugs");
+  // in-scope-but-missing verdict still becomes UNVERIFIABLE
+  assert.match(f, /in scope for a semantic verifier[\s\S]{0,160}UNVERIFIABLE|UNVERIFIABLE[\s\S]{0,200}(missing|null)/i, "in-scope missing verdict still becomes UNVERIFIABLE");
+});
+
 test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "must read the agent-teams env var");

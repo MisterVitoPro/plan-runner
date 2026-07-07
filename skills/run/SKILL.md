@@ -674,6 +674,8 @@ If any wave's bug JSON is missing or has a null `verifier_status`, the verifier 
 
 Print a warning naming each backfilled wave. This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict is still outstanding.
 
+A wave whose bug JSON carries `verifier_status: "SKIPPED"` was intentionally left unverified by `verify_mode` (e.g. an earlier wave under `last-wave-only`). `SKIPPED` is a present, non-null status, so this gate does NOT backfill it and does NOT treat it as a bug. The gate still backfills `UNVERIFIABLE` for any wave that was in scope for a semantic verifier but whose `bugs/wave-<W>.json` is missing or has a null `verifier_status` -- a dispatched verifier that never landed is still a tracked gap, exactly as before. So the "structurally impossible to open a PR while a requested verdict is outstanding" guarantee holds, while an intentional skip stays honest rather than masquerading as clean.
+
 ### 5.1. Count and aggregate
 
 Count total bugs across all bug JSONs. If total bugs == 0:
