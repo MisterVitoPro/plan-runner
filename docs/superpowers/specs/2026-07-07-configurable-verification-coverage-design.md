@@ -182,9 +182,10 @@ verified-clean when it was not:
   now be `SKIPPED`.
 - **Final summary / re-run prompt:** the depth-honest lines above.
 - **PR (skills/pr/SKILL.md):** when `verification.waves_skipped > 0`, force the PR to
-  open as **draft** (regardless of bug count) and add a body banner:
-  `⚠ Verification: <mode> — <m> of <W> waves not semantically verified`. In addition
-  to the existing draft-when-bugs-remain behavior.
+  open as **draft** (regardless of bug count) and add a body banner using GitHub's
+  native alert syntax (no emoji glyph):
+  `> [!WARNING]` / `> Verification: <mode> — <m> of <W> waves not semantically verified`.
+  In addition to the existing draft-when-bugs-remain behavior.
 - **Token Report:** the Verify phase row reflects the actual verifier count under the
   mode (an empty phase row is already omitted as today).
 
