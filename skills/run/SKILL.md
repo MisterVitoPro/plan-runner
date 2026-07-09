@@ -57,33 +57,65 @@ Maintain a running `token_usage` tally in memory across the whole cycle and writ
 
 Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), every dev agent (Step 4a), every wave verifier (Step 4b), and the aggregator (Step 5). `agent` is the subagent label (`analyzer`, `wave-<W>-agent-<n>`, `wave-<W>-verifier`, `aggregator`); `phase` is one of `analyze | wave | verify | aggregate`.
 
-### End-of-run Token Report
+### End-of-run Run Report
 
-Both end-of-run paths -- the Step 6 bug report and the Step 7 final summary -- print a full **Token Report** rendered from the finalized `token_usage`:
+The terminal end of a cycle prints one **Run Report** -- a single ASCII block (fixed 60-column width, no Unicode box-drawing, no color) that presents the whole cycle at a glance and then in detail. It is rendered from the finalized `token_usage` tally (above) and the phase-timing tally. It prints once, as the last output before STOP, on every terminal path: the clean run, the bugs-found run after the user declines the re-run, and the git-absent path. It does NOT print on the bugs-found re-run *handoff* path (user picks `Y`) -- that intermediate cycle prints only the compact decision block (Step 6) and hands off; its full tally still lands in `manifest.json`.
+
+Clean run:
 
 ```
-Token Report
 ============================================================
+  plan-runner cycle 1 -- COMPLETE (clean, no bugs found)
+============================================================
+  Waves        7               Duration     4m 12s
+  Dev agents   8               Tokens       381,852
+  Verifiers    7/7 per-wave    Coverage     12/13 agents
+  Commits      7               Bugs         0
+
+  ! Tokens are a lower bound -- 1 of 13 subagents did not
+    report usage.
+------------------------------------------------------------
+Tokens by phase
+------------------------------------------------------------
  Phase     | Agents | Reported | Input    | Output   | Total
------------|--------|----------|----------|----------|----------
+-----------|--------|----------|----------|----------|--------
  Analyze   |      1 |      1/1 |   12,345 |    2,345 |   14,690
  Dev       |      8 |      7/8 |  201,558 |   40,120 |  241,678
  Verify    |      3 |      3/3 |   88,410 |   12,077 |  100,487
  Aggregate |      1 |      1/1 |   20,115 |    4,882 |   24,997
------------|--------|----------|----------|----------|----------
+-----------|--------|----------|----------|----------|--------
  Total     |     13 |    12/13 |  322,428 |   59,424 |  381,852
-
-Top consumers: wave-2-agent-1 (64,201), wave-1-verifier (41,388), analyzer (14,690)
-Coverage: 12/13 subagents reported usage -- totals are a lower bound (partial)
+ Top consumers: wave-2-agent-1 (64,201), wave-1-verifier (41,388)
+------------------------------------------------------------
+Timing by phase
+------------------------------------------------------------
+  Pre-flight        0m 08s
+  Analyze plan      0m 42s
+  Wave execution    2m 55s   (7 waves)
+  Aggregation       0m 18s
+  Sync code atlas   0m 22s
+  Open PR           0m 07s
+  ------------------------------
+  Total             4m 12s
+------------------------------------------------------------
+Artifacts
+------------------------------------------------------------
+  Manifest    docs/plan-runner/2026-07-07/cycle-1/manifest.json
+============================================================
 ```
 
+Bugs-found run -- same skeleton, three deltas: the title reads `plan-runner cycle <n> -- <N> bugs found (P0:<n> P1:<n> P2:<n> P3:<n>)`; the `Bugs` stat shows `<N>`; and the Artifacts block gains `Bug report` and `Fix plan` rows. When any wave was left unverified a second honesty line prints under the stat header: `! <waves_skipped> of <W> waves were not semantically verified (mode: <verify_mode>).`
+
 Rendering rules:
-- Group `by_agent` entries by `phase`: `analyze` -> Analyze, `wave` -> Dev, `verify` -> Verify, `aggregate` -> Aggregate. Omit a phase row entirely when no subagent was dispatched in that phase (e.g. Aggregate on a zero-bug run).
-- `Agents` = subagents dispatched in the phase; `Reported` = how many surfaced a usage figure.
-- Input / Output / Total columns are sums of the **non-null** values only, with thousands separators. Print `n/a` for a cell where nothing in that phase reported a figure. Never fabricate a number.
-- `Top consumers` lists up to 3 agents with the largest non-null `total`, formatted `<agent> (<total>)`. Omit the line when no agent reported.
-- The Coverage line prints `Coverage: <N>/<N> subagents reported usage -- complete` when every subagent reported; otherwise the lower-bound wording shown above.
-- The `Total` row's Total cell equals `token_usage.total_tokens`.
+
+- **Title.** `COMPLETE (clean, no bugs found)` when `total_bugs == 0`; otherwise `<total_bugs> bugs found (P0:<n> P1:<n> P2:<n> P3:<n>)`.
+- **Stat header** is a two-column grid of label/value pairs. `Waves` = `W`; `Dev agents` = total dev agents dispatched; `Verifiers` = `<waves_verified>/<W> <verify_mode>`; `Commits` = count of waves with a non-null `commit_sha`; `Duration` = total elapsed, `Xm Ys`; `Tokens` = `token_usage.total_tokens` with thousands separators; `Coverage` = `<agents_reported>/<agents_total> agents`; `Bugs` = `total_bugs`.
+- **Honesty lines** (each prefixed `! `) print directly under the stat header, above the tables, and only when they apply:
+  - partial token coverage -- printed only when `token_usage.complete` is false; the totals are a lower bound. Wrap at the 60-column width with a two-space hanging indent.
+  - unverified waves -- printed only when `verification.waves_skipped > 0`.
+- **Tokens by phase** table: group `by_agent` entries by `phase` (`analyze` -> Analyze, `wave` -> Dev, `verify` -> Verify, `aggregate` -> Aggregate); omit a phase row entirely when no subagent was dispatched in that phase (e.g. Aggregate on a zero-bug run). `Agents` = subagents dispatched in the phase; `Reported` = how many surfaced a usage figure. Input / Output / Total are sums of the **non-null** values only, with thousands separators; print `n/a` for a cell where nothing in that phase reported a figure. Never fabricate a number. The `Total` row's Total cell equals `token_usage.total_tokens`. `Top consumers` lists up to 3 agents with the largest non-null `total`, formatted `<agent> (<total>)`; omit the line when no agent reported. The coverage figure is not repeated here -- it lives once, in the stat header.
+- **Timing by phase** table lists each phase's elapsed time as `Xm Ys`: Pre-flight, Analyze plan, Wave execution (annotated `(<W> waves)`), Aggregation (omit the row on a zero-bug run, where no aggregator ran), Sync code atlas (mark skipped when git is absent or code-atlas is not present), Open PR (mark skipped when git is absent), and a `Total`. `User confirm` is excluded from the total.
+- **Artifacts** always lists `Manifest`; it adds `Bug report` and `Fix plan` rows only when `total_bugs > 0`.
 
 ## Step 1: PRE-FLIGHT
 
@@ -739,7 +771,7 @@ Bug report:    <bugs.md path>
 Fix plan:      <fix-plan.md path>
 ```
 
-Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
+Do NOT print the full Run Report here -- this block stays compact so the re-run decision is quick. On the `Y` handoff path the token/timing detail is deferred to the next cycle's Run Report and remains recorded in this cycle's `manifest.json`; on the `n` path the full Run Report prints at the terminal end (after the PR step).
 
 If cycle_n > 1, add a convergence hint:
 ```
@@ -784,34 +816,11 @@ Use absolute paths so the subagent's path resolution does not depend on shared w
 
 **Backend `teams`:** do NOT hand off to a fresh subagent -- a teammate cannot spawn its own team (no nested teams), and the lead is fixed for the session. Instead re-run **in place in the lead session**: re-enter this pipeline from Step 1 with the plan path set to the absolute `fix-plan.md` path (this starts a new cycle under the same date root). Carry the existing `backend = "teams"` forward. When that cycle completes, STOP.
 
-## Step 7: FINAL SUMMARY (clean run only)
+## Step 7: FINALIZE (clean run only)
 
 Reach this step ONLY when total_bugs == 0 (no aggregator dispatched, no re-run prompt).
 
-Print:
-
-```
-plan-runner cycle <cycle_n> complete -- no bugs found.
-==========================================================
-Waves: <W>
-Dev agents: <total dev agents>
-Wave verifiers: <waves_verified> of <W> waves (mode: <verify_mode>)
-Commits: <count of waves with non-null commit_sha>
-Duration: <total elapsed in Xm Ys>
-Tokens: <total_tokens> across <agents_reported>/<agents_total> subagents<if not complete: " (partial -- some subagents did not report usage)">
-
-Manifest: <path to manifest.json>
-```
-
-When `verification.waves_skipped > 0`, append a line to the summary:
-
-```
-Note: <waves_skipped> of <W> waves were not semantically verified (mode: <verify_mode>) -- "no bugs found" means no issues in the verified waves, not a clean bill for the whole plan.
-```
-
-This keeps a reduced-coverage run from reading as fully verified-clean.
-
-Then print the full **Token Report** block rendered per the "End-of-run Token Report" spec in the Token accounting section (per-phase table, top consumers, coverage line).
+Do not print a summary here. The clean-run summary now lives in the single End-of-run Run Report printed at the terminal end (its status-aware title reads `COMPLETE (clean, no bugs found)`, and the unverified-waves honesty line covers `verification.waves_skipped > 0`, so a reduced-coverage run still cannot read as fully verified-clean).
 
 Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 
@@ -879,7 +888,7 @@ Git not available -- skipping the PR step. Review the generated artifacts in the
 cycle directory: <cycle_dir>.
 ```
 
-Then proceed to the Phase Timing Summary and STOP. Do NOT invoke the `plan-runner:pr` skill.
+Then proceed to the End-of-run Run Report (terminal print) and STOP. Do NOT invoke the `plan-runner:pr` skill.
 
 Otherwise (git is available):
 
@@ -901,19 +910,10 @@ Invoke the Skill tool with:
 The `plan-runner:pr` skill reads `manifest.json`, `wave-plan.json`, and the bug JSONs
 from that directory, pushes the current branch, and creates or updates the pull
 request (conventional title, rich body, draft when bugs remain). When it returns,
-print its confirmation line verbatim and STOP.
+print its confirmation line verbatim, then proceed to the End-of-run Run Report (terminal print) and STOP.
 
-## Phase Timing Summary (always print before STOP unless STOP was an early-exit error)
+## End-of-run Run Report (terminal print)
 
-```
-Phase Timing:
-  Pre-flight       <Xm Ys>
-  Analyze plan     <Xm Ys>
-  User confirm     (excluded from total)
-  Wave execution   <Xm Ys>   (<W> waves)
-  Aggregation      <Xm Ys>   (skipped if 0 bugs)
-  Sync code atlas  <Xm Ys>   (skipped if git absent or code-atlas not present)
-  Open PR          <Xm Ys>
-  --------------------------------
-  Total            <Xm Ys>
-```
+Always reached as the last thing before a normal STOP (clean path, bugs-found `n` path, and git-absent path); never reached on the bugs-found `Y` handoff (that cycle STOPs after the handoff) or on an early-exit error STOP.
+
+Compute the per-phase durations from the timestamps recorded through the run (Pre-flight, Analyze plan, Wave execution, Aggregation, Sync code atlas, Open PR) and the `Total`, excluding the User-confirm wait. Then render and print the **End-of-run Run Report** exactly per its spec in the Token accounting section -- status-aware title, two-column stat header, honesty lines, `Tokens by phase` table, `Timing by phase` table (using the durations just computed), and the `Artifacts` block. Then STOP.

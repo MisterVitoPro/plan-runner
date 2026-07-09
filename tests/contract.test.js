@@ -148,7 +148,7 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.9.0", "plugin version is current");
+  assert.equal(pkg.version, "1.10.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
@@ -325,19 +325,40 @@ test("pr skill surfaces token totals in stats", () => {
   assert.match(f, /By phase:.{0,80}(analyze|dev|verify|aggregate)/i, "pr stats include a per-phase breakdown");
 });
 
-test("run skill renders an end-of-run Token Report", () => {
+test("run skill renders a unified end-of-run Run Report", () => {
   const f = read("skills/run/SKILL.md");
-  // a rendering spec exists under the Token accounting section
-  assert.match(f, /### End-of-run Token Report/, "must define the Token Report rendering spec");
-  assert.match(f, /Top consumers/, "report lists top-consuming subagents");
-  assert.match(f, /Coverage:/, "report carries an honest coverage line");
-  assert.match(f, /lower bound/i, "partial coverage is described as a lower bound");
-  assert.match(f, /Omit a phase row/i, "phases with no dispatched agents are omitted, not zero-filled");
-  // both end-of-run paths print it: Step 6 (bugs) and Step 7 (clean)
-  const refs = f.match(/rendered per the "End-of-run Token Report" spec/g) || [];
-  assert.ok(refs.length >= 2, "both Step 6 and Step 7 must print the Token Report block");
-  // honesty invariant: sums cover non-null values only
-  assert.match(f, /non-null.{0,40}values only|sums of the \*\*non-null\*\* values/i, "sums must skip null entries");
+  // one reusable rendering spec, referenced by name
+  assert.match(f, /### End-of-run Run Report/, "defines the unified Run Report spec");
+  // three detail sections under one report
+  assert.match(f, /Tokens by phase/, "report keeps a per-phase token table");
+  assert.match(f, /Timing by phase/, "report folds in per-phase timing");
+  assert.match(f, /^Artifacts$/m, "report lists artifacts");
+  // status-aware title, both variants
+  assert.match(f, /COMPLETE \(clean, no bugs found\)/, "clean title variant");
+  assert.match(f, /bugs found \(P0:/, "bugs title variant carries the P-breakdown");
+  // token honesty preserved from the old Token Report
+  assert.match(f, /Top consumers/, "top-consuming subagents listed");
+  assert.match(f, /lower bound/i, "partial coverage described as a lower bound");
+  assert.match(f, /Omit a phase row/i, "empty phases omitted, not zero-filled");
+  assert.match(f, /sums of the \*\*non-null\*\* values/i, "sums skip null entries");
+  // honesty lines ride under the stat header
+  assert.match(f, /!\s*Tokens are a lower bound/, "partial-token honesty line");
+  assert.match(f, /waves were not semantically verified/, "unverified-waves honesty line");
+  // it prints once at the terminal end -- the old per-step Token Report print is gone
+  assert.doesNotMatch(f, /full \*\*Token Report\*\* block/, "old per-step Token Report print removed");
+});
+
+test("Run Report prints once at the terminal end, not per step", () => {
+  const f = read("skills/run/SKILL.md");
+  // a single terminal print section exists
+  assert.match(f, /## End-of-run Run Report \(terminal print\)/, "terminal print section exists");
+  // the old standalone timing section is gone
+  assert.doesNotMatch(f, /## Phase Timing Summary/, "standalone Phase Timing Summary removed");
+  // Step 6 keeps the compact decision block but not the full report
+  assert.match(f, /\[Phase 4\/4\] Bug Report/, "Step 6 keeps the compact bug decision block");
+  assert.doesNotMatch(f, /"End-of-run Token Report" spec/, "no lingering reference to the old Token Report spec name");
+  // clean run defers its summary to the terminal report
+  assert.match(f, /Step 7: FINALIZE \(clean run only\)/, "Step 7 finalizes rather than printing a summary");
 });
 
 test("README documents token accounting", () => {
