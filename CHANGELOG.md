@@ -2,6 +2,11 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.10.1 - 2026-07-12
+
+### Changed
+- README: cross-reference the ideas plugin as the pipeline front door (interview -> audited spec -> plan-runner-ready plan). No pipeline behavior change.
+
 ## 1.10.0 - 2026-07-07
 
 - Unified end-of-run reporting: the former separate final-summary, Token Report, and Phase Timing blocks are now a single **Run Report** -- a two-column at-a-glance stat header (waves, agents, verifiers, commits, duration, tokens, coverage, bugs) followed by per-phase token and timing tables and an artifacts block, printed once at the terminal end of a cycle on both the clean and bugs-found paths. Partial token coverage and unverified waves are surfaced as honesty lines under the stat header. The bugs-found re-run decision block stays compact (no inline Token Report); intermediate `Y` handoff cycles defer token/timing detail to the manifest and the final cycle's report.

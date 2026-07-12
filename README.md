@@ -4,6 +4,8 @@
 
 Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning.
 
+Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pipeline front door: /ideas:interview turns a raw idea into an audited spec and emits a plan-runner-ready plan for /plan-runner:run. The two install side by side; ideas complements plan-runner, it does not replace it.
+
 ## What it does
 
 1. **Analyze.** A `plan-analyzer` agent reads your plan and buckets tasks into waves of file-disjoint work (max 6 agents per wave, ordered as a DAG).
