@@ -2,6 +2,11 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.11.0 - 2026-07-13
+
+- **Agents bubble up their token usage.** Every pipeline agent (analyzer, dev, test-author, verifier, aggregator) now includes an optional `token_usage` self-report in its return JSON: the most recent usage figure the harness surfaced to it in-band (e.g. a token-budget system warning), or `null` when none appeared -- never an estimate. The orchestrator captures tokens from two sources in strict precedence: the completion result's usage summary (authoritative, `source: "harness"`) first, falling back to the agent's non-null self-report (`source: "self_report"`, an honest lower bound) -- the common rescue for teammates on the Agent Teams backend, whose usage is not always visible to the lead. `tokens: null` remains the outcome only when both sources are dry, so per-agent coverage improves without weakening the never-fabricate invariant.
+- Schemas: `dev-return` and `wave-plan` gain an optional `token_usage` self-report field; manifest `token_usage.by_agent` entries and the reusable `tokenCount` shape gain an optional `source` enum (`harness` | `self_report`). All new fields are optional -- pre-1.11.0 artifacts still validate.
+
 ## 1.10.1 - 2026-07-12
 
 ### Changed

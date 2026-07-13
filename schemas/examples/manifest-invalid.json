@@ -5,5 +5,14 @@
   "context7_available": false,
   "waves": [],
   "total_bugs": 0,
+  "token_usage": {
+    "by_agent": [
+      {"agent": "analyzer", "phase": "analyze", "input": null, "output": null, "total": 5900, "source": "guessed"}
+    ],
+    "total_tokens": 5900,
+    "agents_reported": 1,
+    "agents_total": 1,
+    "complete": true
+  },
   "tdd": {"enabled": "yes"}
 }

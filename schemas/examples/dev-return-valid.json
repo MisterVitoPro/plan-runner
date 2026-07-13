@@ -7,5 +7,6 @@
   "summary": "Wrote failing tests for the adder.",
   "concerns": [],
   "test_files": ["tests/adder.test.js"],
-  "test_ids": ["adds two numbers"]
+  "test_ids": ["adds two numbers"],
+  "token_usage": {"input": null, "output": null, "total": 48210}
 }

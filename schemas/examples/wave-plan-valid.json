@@ -50,5 +50,6 @@
       ]
     }
   ],
-  "uncovered_plan_sections": []
+  "uncovered_plan_sections": [],
+  "token_usage": {"input": null, "output": null, "total": 12450}
 }

@@ -148,7 +148,7 @@ test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", ()
 
 test("docs + version reflect the TDD feature", () => {
   const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.10.1", "plugin version is current");
+  assert.equal(pkg.version, "1.11.0", "plugin version is current");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
@@ -316,6 +316,53 @@ test("run skill captures and tallies subagent tokens", () => {
   // tally fields are finalized and surfaced
   assert.match(f, /total_tokens/, "skill tallies a grand total");
   assert.match(f, /agents_reported/, "skill tracks reporting coverage");
+});
+
+test("every pipeline agent bubbles up a token self-report", () => {
+  for (const a of [
+    "plan-analyzer",
+    "plan-dev",
+    "plan-test-author",
+    "plan-verifier",
+    "plan-aggregator",
+  ]) {
+    const f = read(`agents/${a}.md`);
+    assert.match(f, /## Token self-report/, `${a} has a Token self-report section`);
+    assert.match(f, /"token_usage"|token_usage/, `${a} returns a token_usage field`);
+    assert.match(f, /MOST RECENT figure/, `${a} reports the most recent harness-surfaced figure`);
+    assert.match(f, /NEVER estimate, extrapolate/, `${a} forbids estimating a token count`);
+    assert.match(f, /null is the honest answer/i, `${a} returns null when the harness showed nothing`);
+  }
+});
+
+test("run skill prefers harness usage and falls back to the agent self-report", () => {
+  const f = read("skills/run/SKILL.md");
+  // two labeled sources with strict precedence
+  assert.match(f, /"source":\s*"harness"/, "harness-sourced entries are labeled");
+  assert.match(f, /self_report/, "self-report-sourced entries are labeled");
+  assert.match(f, /precedence/i, "sources are applied in precedence order");
+  assert.match(f, /self-report[\s\S]{0,240}lower bound|lower bound[\s\S]{0,240}self-report/i, "self-reports are described as a lower bound");
+  // fallback fires when the completion result has no figure; null only when both sources are dry
+  assert.match(f, /fall back to the `?token_usage`? self-report/i, "capture falls back to the agent's self-report");
+  assert.match(f, /neither source[\s\S]{0,120}(null|unreported)/i, "tokens are null only when both sources are missing");
+  // honesty invariant extends to self-reports
+  assert.match(f, /token_usage: null`? must never be .{0,10}rescued|never.{0,30}rescued.{0,20}with a guess/i, "a null self-report is never replaced with a guess");
+});
+
+test("return schemas carry an optional token_usage self-report (back-compat)", () => {
+  const dev = JSON.parse(read("schemas/dev-return.schema.json"));
+  assert.ok(dev.properties.token_usage, "dev-return schema defines token_usage");
+  assert.ok(!dev.required.includes("token_usage"), "dev-return token_usage is optional");
+  assert.match(dev.properties.token_usage.description, /1\.11\.0/, "dev-return notes pre-1.11.0 back-compat");
+  const wp = JSON.parse(read("schemas/wave-plan.schema.json"));
+  assert.ok(wp.properties.token_usage, "wave-plan schema defines the analyzer's token_usage");
+  assert.ok(!wp.required.includes("token_usage"), "wave-plan token_usage is optional");
+  // manifest entries record where each figure came from
+  const manifest = JSON.parse(read("schemas/manifest.schema.json"));
+  const byAgent = manifest.properties.token_usage.properties.by_agent.items.properties;
+  assert.deepEqual(byAgent.source.enum, ["harness", "self_report"], "by_agent entries carry a source enum");
+  assert.deepEqual(manifest.$defs.tokenCount.properties.source.enum, ["harness", "self_report"], "tokenCount carries a source enum");
+  assert.ok(!(manifest.properties.token_usage.properties.by_agent.items.required || []).includes("source"), "source is optional on by_agent entries");
 });
 
 test("pr skill surfaces token totals in stats", () => {

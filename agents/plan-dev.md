@@ -33,9 +33,12 @@ You MUST return a single JSON object matching `dev-return.schema.json`. No prose
   "files_unexpectedly_modified": ["<path>", "..."],
   "context7_queries": [{"library": "...", "purpose": "..."}],
   "summary": "<two-sentence what-I-did>",
-  "concerns": ["<optional notes for verifier>"]
+  "concerns": ["<optional notes for verifier>"],
+  "token_usage": {"input": null, "output": null, "total": "<most recent harness-surfaced figure>"}
 }
 ```
+
+`token_usage` may be `null` -- see **Token self-report** below.
 
 ## Process
 
@@ -54,6 +57,10 @@ You MUST return a single JSON object matching `dev-return.schema.json`. No prose
 4. **Implement the task.** Write code that satisfies every acceptance criterion. Stay within `owned_files` -- do NOT modify any file outside that list unless absolutely necessary. If you must touch an outside file, log it in `files_unexpectedly_modified` with reasoning in `concerns`.
 
 5. **Self-check against acceptance criteria.** Before returning, walk through each acceptance criterion and verify your implementation meets it. If any criterion is not met, EITHER fix it OR set status to `DONE_WITH_CONCERNS` and document the gap in `concerns`.
+
+## Token self-report
+
+Include a `token_usage` field in your return JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
 ## Status meanings
 

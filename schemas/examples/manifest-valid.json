@@ -12,10 +12,10 @@
       "wave_id": 1,
       "duration_seconds": 42,
       "agents": [
-        {"agent_id": "wave-1-agent-1", "dev_status": "DONE", "verifier_status": "CLEAN", "bug_count": 0, "tokens": {"input": 12000, "output": 3400, "total": 15400}},
+        {"agent_id": "wave-1-agent-1", "dev_status": "DONE", "verifier_status": "CLEAN", "bug_count": 0, "tokens": {"input": 12000, "output": 3400, "total": 15400, "source": "harness"}},
         {"agent_id": "wave-1-agent-2", "dev_status": "DONE", "verifier_status": "CLEAN", "bug_count": 0, "tokens": null}
       ],
-      "verifier_tokens": {"input": 8000, "output": 1200, "total": 9200},
+      "verifier_tokens": {"input": null, "output": null, "total": 9200, "source": "self_report"},
       "wave_token_total": 24600,
       "commit_sha": "abc123",
       "skipped_reason": null
@@ -24,10 +24,10 @@
   "total_bugs": 0,
   "token_usage": {
     "by_agent": [
-      {"agent": "analyzer", "phase": "analyze", "input": 5000, "output": 900, "total": 5900},
-      {"agent": "wave-1-agent-1", "phase": "wave", "input": 12000, "output": 3400, "total": 15400},
+      {"agent": "analyzer", "phase": "analyze", "input": 5000, "output": 900, "total": 5900, "source": "harness"},
+      {"agent": "wave-1-agent-1", "phase": "wave", "input": 12000, "output": 3400, "total": 15400, "source": "harness"},
       {"agent": "wave-1-agent-2", "phase": "wave", "input": null, "output": null, "total": null},
-      {"agent": "wave-1-verifier", "phase": "verify", "input": 8000, "output": 1200, "total": 9200}
+      {"agent": "wave-1-verifier", "phase": "verify", "input": null, "output": null, "total": 9200, "source": "self_report"}
     ],
     "total_tokens": 30500,
     "agents_reported": 3,

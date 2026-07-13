@@ -32,9 +32,16 @@ After writing, return this JSON status:
   "fix_plan_path": "<absolute path to fix-plan.md>",
   "total_bugs": <int>,
   "by_severity": {"P0": <int>, "P1": <int>, "P2": <int>, "P3": <int>},
-  "by_category": {"missing_requirement": <int>, "incorrect_implementation": <int>, "scope_drift": <int>, "broken_existing": <int>}
+  "by_category": {"missing_requirement": <int>, "incorrect_implementation": <int>, "scope_drift": <int>, "broken_existing": <int>},
+  "token_usage": {"input": null, "output": null, "total": "<most recent harness-surfaced figure>"}
 }
 ```
+
+`token_usage` may be `null` -- see **Token self-report** below.
+
+## Token self-report
+
+Include a `token_usage` field in your status JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
 ## Process
 

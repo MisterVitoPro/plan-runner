@@ -6,5 +6,6 @@
   "context7_queries": [],
   "summary": "Wrote failing tests for the adder.",
   "concerns": [],
-  "test_files": "tests/adder.test.js"
+  "test_files": "tests/adder.test.js",
+  "token_usage": {"input": null, "output": null, "total": "about 50k"}
 }

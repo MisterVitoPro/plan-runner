@@ -51,9 +51,14 @@ Schema (abbreviated; the full schema ships with the plugin at `schemas/wave-plan
       ]
     }
   ],
-  "uncovered_plan_sections": ["<section title>", "..."]
+  "uncovered_plan_sections": ["<section title>", "..."],
+  "token_usage": {"input": null, "output": null, "total": "<most recent harness-surfaced figure, or null -- see Token self-report>"}
 }
 ```
+
+## Token self-report
+
+Include a top-level `token_usage` field in your return JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
 ## Bucketing rules (these are hard constraints)
 
@@ -130,7 +135,7 @@ For each task you identify:
 If the plan has zero extractable tasks, return:
 
 ```json
-{"source_plan": "<path>", "context7_available": <bool>, "waves": [], "uncovered_plan_sections": ["<reason>"]}
+{"source_plan": "<path>", "context7_available": <bool>, "waves": [], "uncovered_plan_sections": ["<reason>"], "token_usage": <self-report or null>}
 ```
 
 The orchestrator will detect zero waves and STOP gracefully.

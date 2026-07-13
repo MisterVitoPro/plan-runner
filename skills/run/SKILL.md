@@ -33,20 +33,19 @@ Track elapsed time for each phase. At the start of each step run `date +%s` and 
 
 plan-runner tallies the tokens consumed by every subagent it dispatches (analyzer, dev agents, wave verifiers, aggregator) so `manifest.json` carries a per-agent breakdown and a grand total for the whole cycle. This is the foundation for tallying the full run's token cost.
 
-There is no tool that returns a subagent's token count directly. The only source is the usage figure the harness surfaces when a subagent finishes, so capture is **best-effort**:
+There is no tool that returns a subagent's token count directly, so capture is **best-effort** from two sources, applied per subagent in strict precedence order:
 
-- When a subagent completes, read the token usage reported in its completion result (the Task/Agent result's usage summary, e.g. input/output token counts). Record it as `{"input": <n>, "output": <n>, "total": <input + output>}`.
-- If only a single combined total is surfaced, record `{"input": null, "output": null, "total": <n>}`.
-- If the harness surfaces no usage figure for that subagent, record `tokens: null` and count the agent as unreported.
+1. **Harness completion usage (authoritative).** When a subagent completes, read the token usage reported in its completion result (the Task/Agent result's usage summary, e.g. input/output token counts). Record it as `{"input": <n>, "output": <n>, "total": <input + output>, "source": "harness"}`. If only a single combined total is surfaced, record `{"input": null, "output": null, "total": <n>, "source": "harness"}`.
+2. **Agent self-report (fallback).** Every pipeline agent bubbles up a `token_usage` field in its return JSON: the most recent usage figure the harness surfaced to it in-band (e.g. a token-budget system warning), or `null` when none appeared. When the completion result carries no usage figure -- common for teammates on the `teams` backend, whose usage may not be visible to the lead -- use the agent's non-null self-report instead: record its fields with `"source": "self_report"` and count the agent as reported. A self-report is a lower bound (the figure predates the agent's final response), but it is a real harness figure, not an estimate.
 
-On the `teams` backend a teammate's usage may not be visible to the lead; record `null` for those. **Never fabricate a token count** -- a `null` with an honest coverage number is the correct outcome when the figure is unavailable.
+If neither source yields a figure, record `tokens: null` (no `source`) and count the agent as unreported. **Never fabricate a token count** -- a `null` with an honest coverage number is the correct outcome when the figure is unavailable, and an agent's `token_usage: null` must never be "rescued" with a guess.
 
 Maintain a running `token_usage` tally in memory across the whole cycle and write it to the manifest at finalization (Step 5 / Step 7):
 
 ```json
 {
   "by_agent": [
-    {"agent": "analyzer", "phase": "analyze", "input": <n|null>, "output": <n|null>, "total": <n|null>}
+    {"agent": "analyzer", "phase": "analyze", "input": <n|null>, "output": <n|null>, "total": <n|null>, "source": "harness | self_report -- omit when tokens are null"}
   ],
   "total_tokens": <sum of every non-null per-agent total>,
   "agents_reported": <count of subagents that surfaced a usage figure>,
@@ -386,7 +385,7 @@ Then STOP.
 
 Write the wave plan to `$cycle_dir/wave-plan.json`.
 
-Capture the analyzer's token usage (see **Token accounting**) and append it to `token_usage.by_agent` as `{"agent": "analyzer", "phase": "analyze", ...}`.
+Capture the analyzer's token usage (see **Token accounting**) and append it to `token_usage.by_agent` as `{"agent": "analyzer", "phase": "analyze", ...}`. The analyzer's return carries a top-level `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure.
 
 Record `t_analyze_done = $(date +%s)`.
 
@@ -480,7 +479,7 @@ For each dev agent return (both backends):
 1. Parse the JSON. If parse fails, treat as `{"agent_id": "<id>", "status": "BLOCKED", "files_written": [], "files_unexpectedly_modified": [], "context7_queries": [], "summary": "agent returned non-JSON output", "concerns": ["unparseable response"]}` and continue.
 2. Update the corresponding Task to `completed`.
 3. Record the dev_status in a wave-state map.
-4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}` (use `tokens: null` if the harness surfaced no figure -- common for teammates on the `teams` backend).
+4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}`: harness completion usage first; when it is absent -- common for teammates on the `teams` backend -- fall back to the `token_usage` self-report in the agent's return JSON; record `tokens: null` only when both are missing.
 
 **Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), read the owned-file state directly, treat any unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
 
@@ -595,7 +594,7 @@ Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
 
 Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
 
-Capture each dispatched verifier's token usage (see **Token accounting**). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
+Capture each dispatched verifier's token usage (see **Token accounting**). Each verifier's bug-report JSON carries a `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure (do not copy the field into the wave's bug JSON). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
 
 **Tear down the wave verifier(s).** Each dispatched verifier's report is now captured -- release it the same way as the dev agents in 4a-bis: `TaskStop` on its background `task_id` (subagent backend) or its teammate agent ID / name (teams backend). For a `per-agent` wave, tear down every verifier. A SKIPPED wave has no verifier to tear down. Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, `UNVERIFIABLE`, or `SKIPPED`).
 
@@ -740,7 +739,7 @@ Read the wave plan at <cycle_dir>/wave-plan.json for task context.
 Write bugs.md and fix-plan.md to <cycle_dir> as instructed. Return the status JSON.
 ```
 
-The aggregator writes the two files itself. When it returns, parse its status JSON. Capture the aggregator's token usage (see **Token accounting**) and append it to `token_usage.by_agent` as `{"agent": "aggregator", "phase": "aggregate", ...}`.
+The aggregator writes the two files itself. When it returns, parse its status JSON. Capture the aggregator's token usage (see **Token accounting**; its status JSON carries a `token_usage` self-report as the fallback source) and append it to `token_usage.by_agent` as `{"agent": "aggregator", "phase": "aggregate", ...}`.
 
 If the aggregator crashes or returns non-JSON:
 ```
