@@ -20,6 +20,15 @@
     "summary": {"type": "string"},
     "concerns": {"type": "array", "items": {"type": "string"}},
     "test_files": {"type": "array", "items": {"type": "string"}, "description": "test-author role: test files written, for orchestrator-scoped gate runs."},
-    "test_ids": {"type": "array", "items": {"type": "string"}, "description": "test-author role: individual test names/IDs added."}
+    "test_ids": {"type": "array", "items": {"type": "string"}, "description": "test-author role: individual test names/IDs added."},
+    "token_usage": {
+      "type": ["object", "null"],
+      "description": "Token self-report: the most recent usage figure the harness surfaced to the agent in-band (e.g. a token-budget system warning), or null when none appeared. A lower bound (it predates the agent's final response), never an estimate. Used by the orchestrator as a fallback when the completion result carries no usage figure. Optional for back-compat with returns written before 1.11.0.",
+      "properties": {
+        "input": {"type": ["integer", "null"]},
+        "output": {"type": ["integer", "null"]},
+        "total": {"type": ["integer", "null"]}
+      }
+    }
   }
 }

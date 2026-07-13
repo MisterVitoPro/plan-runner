@@ -35,11 +35,16 @@ You MUST return a single JSON object matching `dev-return.schema.json`. No prose
   "summary": "<two-sentence what-I-did>",
   "concerns": ["<optional notes for the verifier>"],
   "test_files": ["<test path>", "..."],
-  "test_ids": ["<test name/id>", "..."]
+  "test_ids": ["<test name/id>", "..."],
+  "token_usage": {"input": null, "output": null, "total": "<most recent harness-surfaced figure>"}
 }
 ```
 
 `test_files` lists the files you wrote -- set it to the SAME list as `files_written` (a test-author writes only test files, so the two are identical). `test_ids` are the individual test names so the orchestrator can run them in isolation for the red gate. Leave `files_unexpectedly_modified` empty unless you had to touch a file outside `owned_files` (log it there with reasoning in `concerns`), and record any Context7 lookups in `context7_queries`.
+
+## Token self-report
+
+Include a `token_usage` field in your return JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
 ## Process
 

@@ -42,6 +42,15 @@
         }
       }
     },
-    "uncovered_plan_sections": {"type": "array", "items": {"type": "string"}}
+    "uncovered_plan_sections": {"type": "array", "items": {"type": "string"}},
+    "token_usage": {
+      "type": ["object", "null"],
+      "description": "Analyzer's token self-report: the most recent usage figure the harness surfaced to it in-band (e.g. a token-budget system warning), or null when none appeared. A lower bound, never an estimate. Used by the orchestrator as a fallback when the analyzer's completion result carries no usage figure. Optional for back-compat with wave plans written before 1.11.0.",
+      "properties": {
+        "input": {"type": ["integer", "null"]},
+        "output": {"type": ["integer", "null"]},
+        "total": {"type": ["integer", "null"]}
+      }
+    }
   }
 }

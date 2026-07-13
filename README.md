@@ -88,13 +88,17 @@ and an artifacts block. Partial token coverage is flagged as a lower bound and a
 unverified waves are called out, both directly under the stat header. The PR body
 carries a compact per-phase token breakdown under its `Tokens:` stat.
 
-Capture is **best-effort**: there is no tool that returns a subagent's token
-count, so plan-runner records the usage figure the harness surfaces when each
-subagent finishes. When a figure is unavailable -- most commonly for teammates on
-the Agent Teams backend, whose usage is not always visible to the lead -- that
-agent's entry is `null` and the run is honest about it via the
-`agents_reported` / `agents_total` coverage counters and a `complete` flag. A
-token count is never fabricated. Each cycle's manifest records its own tally; to
+Capture is **best-effort**, from two sources in precedence order: plan-runner
+first records the usage figure the harness surfaces when each subagent finishes
+(authoritative, `source: "harness"`). When that is unavailable -- most commonly
+for teammates on the Agent Teams backend, whose usage is not always visible to
+the lead -- it falls back to the agent's own **token self-report**: every
+pipeline agent bubbles up a `token_usage` field in its return JSON carrying the
+most recent usage figure the harness surfaced to it in-band, or `null` when none
+appeared (`source: "self_report"`, a lower bound, never an estimate). When
+neither source yields a figure that agent's entry is `null` and the run is
+honest about it via the `agents_reported` / `agents_total` coverage counters and
+a `complete` flag. A token count is never fabricated. Each cycle's manifest records its own tally; to
 tally a full multi-cycle run, sum `token_usage.total_tokens` across every cycle's
 `manifest.json` under the cycle root.
 

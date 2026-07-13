@@ -51,13 +51,19 @@ You MUST return a single JSON object. No prose, no Markdown fences:
       "expected": "<what the acceptance criterion required>",
       "suggested_fix": "<concrete suggestion>"
     }
-  ]
+  ],
+  "token_usage": {"input": null, "output": null, "total": "<most recent harness-surfaced figure>"}
 }
 ```
 
 - `verifier_status` is `CLEAN` if ALL agents are clean, `BUGS_FOUND` if any agent has bugs, `UNVERIFIABLE` if you couldn't verify any agent.
 - `agent_statuses` maps each `agent_id` to its individual result.
 - `bugs` is the flat union of all bugs across all agents. If no bugs, return `"bugs": []`.
+- `token_usage` may be `null` -- see **Token self-report** below.
+
+## Token self-report
+
+Include a `token_usage` field in your return JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
 ## Process
 

@@ -55,7 +55,7 @@
     "total_bugs": {"type": "integer"},
     "token_usage": {
       "type": ["object", "null"],
-      "description": "Best-effort tally of tokens consumed by every dispatched subagent (analyzer, dev agents, wave verifiers, aggregator). Captured from the usage figures the harness surfaces when each subagent completes; entries are null where no figure was surfaced (e.g. teammates on the teams backend). null until the run finalizes the tally. Optional for back-compat with manifests written before 1.5.0.",
+      "description": "Best-effort tally of tokens consumed by every dispatched subagent (analyzer, dev agents, wave verifiers, aggregator). Captured from the usage figure the harness surfaces when each subagent completes, falling back to the agent's own token_usage self-report (the last figure the harness surfaced to it in-band) when the completion result carries none; entries are null where neither source yielded a figure. null until the run finalizes the tally. Optional for back-compat with manifests written before 1.5.0.",
       "properties": {
         "by_agent": {
           "type": "array",
@@ -67,7 +67,8 @@
               "phase": {"type": "string", "enum": ["analyze", "wave", "verify", "aggregate"]},
               "input": {"type": ["integer", "null"]},
               "output": {"type": ["integer", "null"]},
-              "total": {"type": ["integer", "null"]}
+              "total": {"type": ["integer", "null"]},
+              "source": {"type": "string", "enum": ["harness", "self_report"], "description": "Where the figure came from: 'harness' = the completion result's usage summary (authoritative); 'self_report' = the agent's own token_usage return field (a lower bound). Absent when tokens are null, and on manifests written before 1.11.0 (absent = harness)."}
             }
           }
         },
@@ -135,11 +136,12 @@
   "$defs": {
     "tokenCount": {
       "type": ["object", "null"],
-      "description": "Best-effort token usage for one subagent, captured from the harness completion summary. null when no figure was surfaced; individual fields may be null when only a single total is reported.",
+      "description": "Best-effort token usage for one subagent: the harness completion summary when surfaced, else the agent's own token_usage self-report. null when neither source yielded a figure; individual fields may be null when only a single total is reported.",
       "properties": {
         "input": {"type": ["integer", "null"]},
         "output": {"type": ["integer", "null"]},
-        "total": {"type": ["integer", "null"]}
+        "total": {"type": ["integer", "null"]},
+        "source": {"type": "string", "enum": ["harness", "self_report"], "description": "Where the figure came from. 'self_report' figures are lower bounds. Absent on manifests written before 1.11.0 (absent = harness)."}
       }
     }
   }
