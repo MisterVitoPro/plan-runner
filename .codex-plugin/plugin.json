@@ -1,0 +1,40 @@
+{
+  "name": "plan-runner",
+  "version": "1.12.0",
+  "description": "Execute a Markdown implementation plan as file-disjoint parallel waves with test-first gates, independent verification, bug-driven re-planning, and an optional pull request.",
+  "author": {
+    "name": "MisterVitoPro",
+    "url": "https://github.com/MisterVitoPro"
+  },
+  "homepage": "https://github.com/MisterVitoPro/plan-runner",
+  "repository": "https://github.com/MisterVitoPro/plan-runner",
+  "license": "MIT",
+  "keywords": [
+    "agent-orchestration",
+    "implementation-plan",
+    "parallel-agents",
+    "verification",
+    "tdd",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plan Runner",
+    "shortDescription": "Execute plans in verified parallel waves",
+    "longDescription": "Analyze a Markdown plan into file-disjoint waves, dispatch test and implementation agents in parallel, gate every configured wave with independent verification, aggregate bugs into a re-runnable fix plan, and optionally open a structured pull request.",
+    "developerName": "MisterVitoPro",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/MisterVitoPro/plan-runner",
+    "defaultPrompt": [
+      "Run this implementation plan with Plan Runner.",
+      "Execute this plan in parallel with per-wave verification.",
+      "Open a pull request for this completed Plan Runner cycle."
+    ],
+    "brandColor": "#EA580C"
+  }
+}

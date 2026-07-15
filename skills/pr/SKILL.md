@@ -1,7 +1,7 @@
 ---
-name: plan-runner:pr
+name: pr
 description: >
-  Internal plan-runner step (invoked by /plan-runner:run at pipeline end, not run
+  Internal plan-runner step (invoked by the run skill at pipeline end, not run
   directly): push the current branch and open or update a proper pull request --
   conventional title, rich structured body (summary, whole-branch diff, bug counts,
   stats), and a smart draft/ready default based on remaining bugs. Reads everything
@@ -10,11 +10,9 @@ description: >
 
 You are opening (or updating) the pull request for a completed plan-runner run.
 
-The single argument is the absolute path to the completed cycle directory:
+The skill invocation input is the absolute path to the completed cycle directory.
 
-**"{$ARGUMENTS}"**
-
-Set `cycle_dir = {$ARGUMENTS}` (strip surrounding whitespace/quotes). Follow these
+Set `cycle_dir` to that input (strip surrounding whitespace/quotes). Follow these
 steps in order. Do not skip steps.
 
 ## Step 0: Git pre-check
@@ -29,7 +27,7 @@ plan-runner:pr: git not available (no git binary or not a git repository) --
 cannot push a branch or open a PR. Skipping the PR step.
 ```
 
-(When invoked by `/plan-runner:run`, this case is already handled upstream and the PR
+(When invoked by the Plan Runner run skill, this case is already handled upstream and the PR
 step is skipped, so this guard only matters for a direct invocation.)
 
 ## Step 1: Load cycle state

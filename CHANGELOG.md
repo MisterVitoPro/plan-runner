@@ -2,6 +2,13 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.12.0 - 2026-07-14
+
+- Added a Codex plugin manifest while keeping the Claude Code manifest and shared skill source intact.
+- Made skill frontmatter and invocation wording portable across Claude Code and Codex. Bundled role definitions are now loaded relative to each active skill before native subagent dispatch, so Codex does not depend on automatic registration of `agents/` files.
+- Kept Claude Code Agent Teams as an optional Claude-only backend; Codex and standard Claude sessions use the shared native-subagent backend.
+- Updated CI, release automation, documentation, and both marketplace catalogs for dual-client publishing.
+
 ## 1.11.0 - 2026-07-13
 
 - **Agents bubble up their token usage.** Every pipeline agent (analyzer, dev, test-author, verifier, aggregator) now includes an optional `token_usage` self-report in its return JSON: the most recent usage figure the harness surfaced to it in-band (e.g. a token-budget system warning), or `null` when none appeared -- never an estimate. The orchestrator captures tokens from two sources in strict precedence: the completion result's usage summary (authoritative, `source: "harness"`) first, falling back to the agent's non-null self-report (`source: "self_report"`, an honest lower bound) -- the common rescue for teammates on the Agent Teams backend, whose usage is not always visible to the lead. `tokens: null` remains the outcome only when both sources are dry, so per-agent coverage improves without weakening the never-fabricate invariant.

@@ -84,28 +84,26 @@ test("SKILL runs per-agent red/green gates, routes bugs, records evidence", () =
 
 test("SKILL Step 4a dispatches agents by role (test-author vs impl)", () => {
   const f = read("skills/run/SKILL.md");
-  // the test-author agent must be dispatched by registered subagent type (not inlined)
-  assert.match(f, /plan-runner:plan-test-author/, "Step 4 must dispatch the plan-test-author agent by subagent type for test-author roles");
+  assert.match(f, /\.\.\/\.\.\/agents\/plan-test-author\.md/, "Step 4 must load the bundled plan-test-author role");
+  assert.match(f, /complete bundled role definition|complete role definition/i, "Step 4 must include the role definition in portable prompts");
   // dispatch must branch on role
   assert.match(f, /role.{0,40}(test-author|impl)/is, "dispatch must select the agent by role");
   // impl agents must be told which tests to satisfy at dispatch time
   assert.match(f, /TESTS TO SATISFY|forward.{0,30}tests_to_satisfy|tests_to_satisfy.{0,40}(prompt|dispatch|impl agent)/is, "impl dispatch must forward tests_to_satisfy");
 });
 
-test("SKILL dispatches pipeline agents by registered subagent type (no inlining)", () => {
+test("SKILL loads every bundled pipeline role relative to itself", () => {
   const f = read("skills/run/SKILL.md");
-  // all five pipeline agents are referenced by type, keeping prompts token-lean
-  for (const t of [
-    "plan-runner:plan-analyzer",
-    "plan-runner:plan-dev",
-    "plan-runner:plan-test-author",
-    "plan-runner:plan-verifier",
-    "plan-runner:plan-aggregator",
+  for (const role of [
+    "plan-analyzer.md",
+    "plan-dev.md",
+    "plan-test-author.md",
+    "plan-verifier.md",
+    "plan-aggregator.md",
   ]) {
-    assert.match(f, new RegExp(t), `must dispatch ${t} by subagent type`);
+    assert.match(f, new RegExp(`\\.\\.\\/\\.\\.\\/agents\\/${role.replace(".", "\\.")}`), `must load ${role} relative to the skill`);
   }
-  // the old inline-the-full-content pattern must be gone
-  assert.doesNotMatch(f, /inline the full content of .*agents\/.*\.md/i, "must not inline agent .md bodies into prompts");
+  assert.match(f, /Codex discovers the skills and does not automatically register `agents\/` files/i, "must explain why portable role loading is required");
 });
 
 test("SKILL gates each wave on the verifier and forbids the orchestrator self-verifying", () => {
@@ -138,17 +136,22 @@ test("coverage gate treats SKIPPED as intentional, distinct from UNVERIFIABLE", 
   assert.match(f, /in scope for a semantic verifier[\s\S]{0,160}UNVERIFIABLE|UNVERIFIABLE[\s\S]{0,200}(missing|null)/i, "in-scope missing verdict still becomes UNVERIFIABLE");
 });
 
-test("SKILL selects an execution backend (Agent Teams vs subagent fallback)", () => {
+test("SKILL selects an execution backend (Claude Agent Teams vs native subagents)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "must read the agent-teams env var");
   assert.match(f, /backend\s*=\s*"teams"/, "must select the teams backend");
   assert.match(f, /backend\s*=\s*"subagent"/, "must fall back to the subagent backend");
+  assert.match(f, /In Codex[\s\S]{0,160}backend\s*=\s*"subagent"/i, "Codex must use native subagents");
   assert.match(f, /per-wave barrier|wave barrier/i, "both backends must keep the per-wave barrier");
 });
 
 test("docs + version reflect the TDD feature", () => {
-  const pkg = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.equal(pkg.version, "1.11.0", "plugin version is current");
+  const claude = JSON.parse(read(".claude-plugin/plugin.json"));
+  const codex = JSON.parse(read(".codex-plugin/plugin.json"));
+  const npm = JSON.parse(read("package.json"));
+  assert.equal(claude.version, "1.12.0", "plugin version is current");
+  assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
+  assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
@@ -161,13 +164,12 @@ test("README documents configurable verification coverage", () => {
   assert.match(readme, /last-wave-only/, "README lists the verification modes");
 });
 
-test("SKILL tears down dev agents and the wave verifier after every wave (no idle agents)", () => {
+test("SKILL releases dev agents and wave verifiers after every wave", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /Tear down wave dev agents/i, "must define a dev-agent teardown step");
   assert.match(f, /Tear down the wave verifier/i, "must tear down the wave verifier too");
-  // teardown for both backends via TaskStop
-  assert.match(f, /TaskStop[\s\S]{0,120}task_id/i, "subagent backend tears down via TaskStop with the task_id");
-  assert.match(f, /TaskStop[\s\S]{0,160}(teammate|name@team)/i, "teams backend tears down via TaskStop with the teammate id");
+  assert.match(f, /host-native (stop|facility)|host-native facility/i, "subagent teardown uses the host-native facility");
+  assert.match(f, /teammate.{0,80}(agent ID|name@team|bare teammate name)/i, "teams backend tears down by teammate identity");
   // dev-agent teardown happens regardless of status, and before the next dispatch
   assert.match(f, /regardless of `?dev_status`?[\s\S]{0,40}(DONE|BLOCKED)/i, "dev agents are torn down regardless of DONE/BLOCKED status");
   // verifier teardown happens regardless of verdict
@@ -229,7 +231,7 @@ test("git is optional: run skill gates all git ops on availability", () => {
   // (allow backticks around `git_available` in the prose)
   assert.match(f, /git_available.{0,3}is false[\s\S]{0,80}skip this step/i, "clean-tree check skipped when git absent");
   assert.match(f, /git_available.{0,3}is false[\s\S]{0,120}(skipping commit|git not available)/i, "per-wave commit skipped when git absent");
-  assert.match(f, /git_available.{0,3}is false[\s\S]{0,400}plan-runner:pr/i, "PR step skipped when git absent");
+  assert.match(f, /git_available.{0,3}is false[\s\S]{0,400}Plan Runner PR/i, "PR step skipped when git absent");
 });
 
 test("git is optional: pr skill guards on git availability", () => {
@@ -452,6 +454,16 @@ test("docs cover the Agent Teams backend", () => {
   const readme = read("README.md");
   assert.match(readme, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS/, "README documents the agent-teams env var");
   assert.match(readme, /2\.1\.178/, "README notes the Claude Code version requirement");
+});
+
+test("skills use Codex-compatible frontmatter and portable invocations", () => {
+  for (const name of ["run", "pr"]) {
+    const f = read(`skills/${name}/SKILL.md`);
+    const frontmatter = f.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+    assert.match(frontmatter, new RegExp(`^name: ${name}$`, "m"), `${name} matches its folder`);
+    assert.doesNotMatch(frontmatter, /^argument-hint:/m, `${name} omits unsupported argument-hint`);
+    assert.doesNotMatch(f, /\{\$ARGUMENTS\}/, `${name} does not depend on Claude argument interpolation`);
+  }
 });
 
 test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {

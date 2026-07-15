@@ -1,10 +1,10 @@
 # plan-runner
 
-![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)
+![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fv1.12.0%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)
 
-Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning.
+Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning in Claude Code or Codex.
 
-Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pipeline front door: /ideas:interview turns a raw idea into an audited spec and emits a plan-runner-ready plan for /plan-runner:run. The two install side by side; ideas complements plan-runner, it does not replace it.
+Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pipeline front door: its interview skill turns a raw idea into an audited spec and emits a plan-runner-ready plan for the run skill. The two install side by side; Ideas complements Plan Runner, it does not replace it.
 
 ## What it does
 
@@ -12,31 +12,39 @@ Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pip
 2. **Confirm.** You see the wave plan and approve before any dev work runs.
 3. **Execute per wave.** For each wave: dispatch up to 6 dev agents in parallel (TDD runs use `plan-test-author` for test-author roles and `plan-dev` for impl/standalone roles), then dispatch one `plan-verifier` for the wave, then commit the wave with verifier status in the message.
 4. **Aggregate.** A `plan-aggregator` agent collects every verifier-flagged bug, deduplicates, ranks by severity (P0-P3), and writes both a `bugs.md` audit and a `fix-plan.md` (a new plan ready for re-runs).
-5. **Re-run prompt.** You decide whether to auto-handoff to a fresh-context subagent that runs `/plan-runner:run <fix-plan.md>` for cycle 2.
+5. **Re-run prompt.** You decide whether to auto-handoff to a fresh-context subagent that runs the generated `fix-plan.md` for cycle 2.
 
 ## Install
 
 ```bash
+# Claude Code
 claude plugin marketplace add MisterVitoPro/qa-claude-market
 claude plugin install plan-runner@mistervitopro-plugin-marketplace
+
+# Codex
+codex plugin marketplace add MisterVitoPro/qa-claude-market
+codex plugin add plan-runner@mistervitopro-plugin-marketplace
 ```
+
+Start a new session after installation. The bundled SessionStart hook requires Node.js on `PATH`; in Codex, review and trust it with `/hooks` before expecting automatic `.gitignore` setup.
 
 ## Usage
 
 ```bash
+# Claude Code
 /plan-runner:run docs/foo/feature-plan.md
+
+# Codex
+$plan-runner:run docs/foo/feature-plan.md
 ```
 
 The plan can be any Markdown file with task content. There is no required schema -- the analyzer reads it heuristically.
 
-## Token-efficient mode (Agent Teams, experimental)
+## Subagent backends
 
-plan-runner dispatches every pipeline agent (analyzer, dev, test-author,
-verifier, aggregator) by its **registered subagent type** rather than pasting the
-agent definition into each prompt. This alone removes the dominant token cost and
-applies to every run.
+Plan Runner loads each bundled role definition relative to the active skill and dispatches it through the host's native subagent facility. This works in both Claude Code and Codex without depending on automatic registration of files under `agents/`.
 
-On top of that, plan-runner auto-detects Claude Code's experimental **Agent
+Claude Code additionally supports its experimental **Agent
 Teams** orchestration and uses it when available:
 
 - **Enable it** by setting the environment variable
@@ -56,8 +64,8 @@ Teams** orchestration and uses it when available:
   verdict never lands the wave is marked `UNVERIFIABLE` and routed through the
   fix-plan loop. A coverage gate before aggregation backfills any missing verdict,
   so a PR can never open while a wave's verifier is still outstanding.
-- **Fallback.** If the variable is not set (or the build is older than 2.1.178),
-  plan-runner transparently uses the original subagent backend. The pre-flight
+- **Fallback.** Codex always uses native subagents. If the variable is not set in Claude Code (or the build is older than 2.1.178),
+  Plan Runner also uses the native subagent backend. The pre-flight
   output prints which backend is active, and `manifest.json` records it under
   `"backend"`.
 - **Display note.** Split-pane teammate views need tmux or iTerm2; the default
@@ -104,7 +112,7 @@ tally a full multi-cycle run, sum `token_usage.total_tokens` across every cycle'
 
 ## TDD red-green mode
 
-`/plan-runner:run` enables a Test-Driven Development red-green workflow by
+The Plan Runner run skill enables a Test-Driven Development red-green workflow by
 default (no prompt); pass `--no-tdd` to run the classic pipeline instead:
 
 - **Testable tasks** are split into a *test-author* step (writes a failing test)
@@ -165,19 +173,19 @@ waves unverified opens its PR as a **draft** with a warning banner, and the
 
 Right before opening the PR, plan-runner keeps a [code-atlas](../code-atlas)
 architecture index in sync with what the cycle just built. If `.code-atlas/state.json`
-is present (code-atlas is installed and has been mapped), it invokes `/code-atlas:update`
+is present (Code Atlas is installed and has been mapped), it invokes the Code Atlas update skill
 with no arguments -- the update diffs file hashes against the committed wave changes and
 refreshes only what changed, auto-selecting its depth (micro / targeted / full). If
 `.code-atlas/` is absent it is skipped silently; plan-runner never auto-runs a full
-`/code-atlas:map`. The step is also skipped in no-git mode (the update relies on git).
-`code-atlas:update` writes only to `.code-atlas/` (gitignored), so it adds nothing to the
+Code Atlas map skill. The step is also skipped in no-git mode (the update relies on git).
+The update skill writes only to `.code-atlas/` (gitignored), so it adds nothing to the
 PR diff -- it runs only on the terminal cycle that opens the PR, not on intermediate
 fix-plan re-runs. The outcome is recorded in `manifest.json` under `code_atlas_sync`.
 
 ## Pull request
 
 At the end of a run, plan-runner pushes the branch and opens (or updates) a pull
-request via the internal `plan-runner:pr` skill. The PR uses a conventional title
+request via the internal Plan Runner PR skill. The PR uses a conventional title
 (`feat:`/`fix:`), a structured body (Summary, Changes with a whole-branch diff
 summary, Bug counts by severity, and plan-runner stats), and a smart default: it
 opens as a **draft** when unresolved bugs remain and ready-for-review otherwise. If a

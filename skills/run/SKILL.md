@@ -1,23 +1,26 @@
 ---
-name: plan-runner:run
+name: run
 description: >
   Run a free-form Markdown implementation plan through a parallel agent swarm with
-  per-wave verification. Each cycle: analyze the plan into file-disjoint waves of <=6
+  per-wave verification. Each cycle: analyze the plan into file-disjoint waves of at most 6
   agents, dispatch dev + verifier agents per wave, commit per wave, aggregate bugs at
   the end, and prompt to re-run with the generated fix-plan. Use when the user has a
   Markdown plan they want executed with built-in verification and bug-driven re-planning.
-argument-hint: "<path-to-plan.md> [--verbose] [--no-tdd] [--test-cmd \"<cmd>\"] [--verify <mode>]"
 ---
 
-You are orchestrating a plan-runner pipeline cycle. The user's arguments are:
+Orchestrate a plan-runner pipeline cycle. Treat the text supplied with the skill invocation as the invocation input.
 
-**"{$ARGUMENTS}"**
+## Portable role loading and host facilities
+
+Resolve bundled files relative to this `SKILL.md`, not the current working directory. The role directory is `../../agents/`; the schema directory is `../../schemas/`; and the sibling PR skill is `../pr/SKILL.md`. Before dispatching an analyzer, developer, test author, verifier, or aggregator, read the corresponding role file and include its body in that subagent's prompt. Claude Code may expose those files as namespaced agent types, but never depend on that registration: Codex discovers the skills and does not automatically register `agents/` files.
+
+Use the host's native subagent and progress facilities. Parallelize file-disjoint roles in one batch when supported. Model labels are recommendations; use the closest available model without blocking. Use an available structured-input facility at user gates, or ask in plain chat when none exists.
 
 Follow this pipeline exactly. Do not skip steps.
 
 ## Argument parsing
 
-Tokenize `{$ARGUMENTS}` on whitespace. The first non-flag token is the plan path. Flags:
+Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path. Flags:
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
@@ -127,8 +130,9 @@ Parse the argument as a file path. If the path is empty or the file does not exi
 ```
 Error: plan file not found: <path>
 
-Usage: /plan-runner:run <path-to-plan.md>
-Example: /plan-runner:run docs/foo/feature.md
+Claude Code: /plan-runner:run <path-to-plan.md>
+Codex: $plan-runner:run <path-to-plan.md>
+Example: $plan-runner:run docs/foo/feature.md
 ```
 
 Then STOP.
@@ -200,7 +204,7 @@ Before dispatching the analyzer, compute a cheap structure score on the plan con
 - `task_boundary_count` = number of lines matching `^## ` OR `^### Task` OR `^Task \d+:` (case-sensitive).
 - `path_token_count` = number of tokens matching `(?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,5}` (path segments with a file extension).
 
-Use the Bash tool with `awk` / `grep -c` to count -- do NOT read the plan into your own context twice.
+Use available shell tools such as `awk` / `grep -c` to count -- do NOT read the plan into your own context twice.
 
 Decision:
 - If `task_boundary_count >= 2` AND `path_token_count >= 2` AND `path_token_count >= task_boundary_count`: set `analyzer_model = "haiku"`. The plan is well-structured; DAG inference is mostly mechanical.
@@ -223,18 +227,19 @@ If false: print `Context7 MCP not detected -- dev agents will rely on training d
 
 plan-runner can run wave execution two ways. Pick the backend now:
 
-1. Read the env var with Bash: `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
-2. If the value is exactly `1` AND this Claude Code session exposes Agent Teams tooling (team task list + teammate spawning, Claude Code v2.1.178+), set `backend = "teams"`. Otherwise set `backend = "subagent"`.
+1. If running in Claude Code, read `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` with an available shell command.
+2. If the value is exactly `1` AND this Claude Code session exposes Agent Teams tooling (team task list + teammate spawning, Claude Code v2.1.178+), set `backend = "teams"`.
+3. In Codex, or in Claude Code without both prerequisites, set `backend = "subagent"` and use the host's native subagent facility.
 3. Print one of:
 
 ```
 Agent Teams enabled -- using team backend (lean orchestration, lower token usage).
 ```
 ```
-Agent Teams not enabled -- using subagent backend. Set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (Claude Code v2.1.178+) for lower token usage.
+Using native subagent backend.
 ```
 
-If the env var is set to `1` but team tooling is not available (older build), do NOT error -- fall back to `backend = "subagent"` and print the second message with a note that the build is too old.
+If the env var is set to `1` but team tooling is not available (older Claude Code build), do NOT error -- fall back to `backend = "subagent"` and print the second message with a note that the build is too old.
 
 Store `backend` for the manifest and for Step 4 / Step 6 branching.
 
@@ -336,7 +341,7 @@ Print:
 [Phase 1/4] Analyzing plan and computing wave plan...
 ```
 
-Prepare the plan contents with 1-indexed line-number prefixes. Using Bash:
+Prepare the plan contents with 1-indexed line-number prefixes using an available shell:
 
 ```bash
 awk '{printf "%4d\t%s\n", NR, $0}' "<plan path>"
@@ -344,7 +349,7 @@ awk '{printf "%4d\t%s\n", NR, $0}' "<plan path>"
 
 Capture the result as `PLAN_WITH_LINES`.
 
-Dispatch ONE analyzer via the **registered subagent type `plan-runner:plan-analyzer`**. Do NOT inline the agent file -- the definition body loads automatically as the agent's system prompt. Pass ONLY the per-invocation parameters:
+Read `../../agents/plan-analyzer.md` relative to this skill and dispatch one analyzer with the complete role definition plus these per-invocation parameters:
 
 ```
 You are being deployed as the plan-analyzer for plan-runner cycle <cycle_n>.
@@ -370,7 +375,7 @@ When the agent returns, parse the JSON. If parsing fails:
 - If second attempt also fails, print the agent's raw output and STOP.
 
 Validate the wave plan:
-1. Conforms to the plugin's `schemas/wave-plan.schema.json` (under the plugin root, i.e. `${CLAUDE_PLUGIN_ROOT}/schemas/wave-plan.schema.json`; use Python+jsonschema if available; otherwise structural check: required fields present, agent counts <=6, file paths unique within each wave). Note that `rationale` and `complexity_signals` are optional -- do NOT fail validation if they are absent.
+1. Conforms to `../../schemas/wave-plan.schema.json`, resolved relative to this skill (use Python+jsonschema if available; otherwise structural check: required fields present, agent counts <=6, file paths unique within each wave). Note that `rationale` and `complexity_signals` are optional -- do NOT fail validation if they are absent.
 2. Within each wave, the union of `owned_files` across all agents has no duplicates.
 3. Every agent has a `task_excerpt_lines` matching `^[0-9]+-[0-9]+$` where START <= END and END <= total lines in the plan file.
 
@@ -436,13 +441,13 @@ Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record
 
 ### 4a. Dispatch dev agents (parallel)
 
-**Select the registered subagent type by the wave-plan `role` field** (in classic / non-TDD runs there is no `role` -- treat every agent as an impl/standalone dev agent and use `plan-runner:plan-dev`). Do NOT inline agent `.md` bodies -- referencing the type loads the definition as the agent's system prompt automatically and keeps each prompt small:
+**Select and load the bundled role by the wave-plan `role` field** (in classic / non-TDD runs there is no `role` -- treat every agent as an impl/standalone dev agent and load `plan-dev.md`):
 
-- `role: "test-author"` -> subagent type `plan-runner:plan-test-author`; include the resolved `test_command` so it can match the test framework/style.
-- `role: "impl"` -> subagent type `plan-runner:plan-dev`; include a `TESTS TO SATISFY` block listing the agent's `tests_to_satisfy`.
-- `role: "standalone"` or no role (classic) -> subagent type `plan-runner:plan-dev` with no `TESTS TO SATISFY` block.
+- `role: "test-author"` -> read `../../agents/plan-test-author.md`; include the resolved `test_command` so it can match the test framework/style.
+- `role: "impl"` -> read `../../agents/plan-dev.md`; include a `TESTS TO SATISFY` block listing the agent's `tests_to_satisfy`.
+- `role: "standalone"` or no role (classic) -> read `../../agents/plan-dev.md` with no `TESTS TO SATISFY` block.
 
-Common per-invocation prompt template (parameters only -- the agent body comes from its registered definition):
+Common per-invocation prompt template (prepend the complete bundled role definition):
 
 ```
 You are being deployed as a dev agent for plan-runner cycle <cycle_n>, wave <W>.
@@ -468,16 +473,16 @@ The agent reads the task prose from `plan_path` using the line range -- the orch
 
 Dispatch depends on `backend`:
 
-**Backend `subagent` (default):** Create one Claude Task per dev agent for live UI progress (TaskCreate). In a SINGLE message, dispatch all dev agents in this wave with `run_in_background: true`, each using its role-selected `subagent_type` and the per-invocation prompt above. As each background agent completes, the orchestrator receives a notification; collect all dev agent return JSONs.
+**Backend `subagent` (default, including Codex):** Create one progress item per dev agent when the host offers task tracking; otherwise maintain a concise checklist. In one parallel batch, dispatch all dev agents in this wave with the role definition and per-invocation prompt above. Collect every dev agent return JSON.
 
 **Backend `teams`:** The session is the team lead.
 1. Create one task on the shared team task list per wave-plan agent, embedding the per-invocation prompt parameters (agent_id, task_title, plan_path, task_excerpt_lines, owned files, acceptance criteria, role-specific blocks) in the task detail. Give the wave's tasks no unmet dependencies so they are all immediately claimable (cross-wave ordering is enforced by the lead opening one wave at a time, not by global DAG edges).
-2. Spawn one teammate per task (honor the <=6-per-wave cap), each referencing the role-selected `subagent_type` and the role's `recommended_model`. Teammates self-claim the wave's tasks.
+2. Spawn one teammate per task (honor the <=6-per-wave cap), each receiving the role-selected bundled definition and using the role's `recommended_model` when available. Teammates self-claim the wave's tasks.
 3. Read teammate progress from the task list / mailbox -- do NOT pull full JSON returns into the lead context. Each teammate records its final JSON status as its task result / final message.
 
 For each dev agent return (both backends):
 1. Parse the JSON. If parse fails, treat as `{"agent_id": "<id>", "status": "BLOCKED", "files_written": [], "files_unexpectedly_modified": [], "context7_queries": [], "summary": "agent returned non-JSON output", "concerns": ["unparseable response"]}` and continue.
-2. Update the corresponding Task to `completed`.
+2. Update the corresponding progress item or fallback checklist entry to `completed`.
 3. Record the dev_status in a wave-state map.
 4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}`: harness completion usage first; when it is absent -- common for teammates on the `teams` backend -- fall back to the `token_usage` self-report in the agent's return JSON; record `tokens: null` only when both are missing.
 
@@ -489,8 +494,8 @@ For each dev agent return (both backends):
 
 A finished dev agent does not exit on its own -- it stays resident (an idle background task or an idle teammate) until explicitly stopped. As soon as the wave barrier above is satisfied and every dev agent's return has been captured, tear each one down immediately, before dispatching the wave verifier (4b):
 
-- **Backend `subagent`:** call `TaskStop` with the background `task_id` created for that agent in 4a.
-- **Backend `teams`:** call `TaskStop` with the teammate's agent ID (`name@team`) or bare teammate name.
+- **Backend `subagent`:** release or stop the subagent with the host-native facility when it remains resident; if it exits automatically, no action is required.
+- **Backend `teams`:** stop the teammate with its agent ID (`name@team`) or bare teammate name.
 
 Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BLOCKED`) -- a blocked agent still holds its process open. If `TaskStop` reports the task already gone, treat that as success; there is nothing left to release. Do this for every wave, not only the last one -- letting agents from wave 1 idle until the whole cycle ends wastes resources for the run's entire duration.
 
@@ -498,7 +503,7 @@ Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BL
 
 If `tdd_enabled` is false, skip this step (classic pipeline).
 
-Gates are applied **per agent**, by `role`, because a single wave may mix test-author, impl, and standalone agents. For each agent in the wave, run the matching gate via Bash and capture verbatim output. There are **No inline retries** -- every gate failure is recorded as captured output for the verifier and surfaces as a bug routed through the normal aggregate -> fix-plan -> re-run loop.
+Gates are applied **per agent**, by `role`, because a single wave may mix test-author, impl, and standalone agents. For each agent in the wave, run the matching gate with an available shell and capture verbatim output. There are **No inline retries** -- every gate failure is recorded as captured output for the verifier and surfaces as a bug routed through the normal aggregate -> fix-plan -> re-run loop.
 
 **Test-author agent (role: test-author) -> RED gate:**
 1. For each file in the agent's reported `test_files`, run the single-file test command (substitute `{file}`). Capture exit code + output.
@@ -529,7 +534,7 @@ Whether this wave gets a semantic verifier depends on `verify_mode` (resolved in
 - `per-agent`: yes -- one verifier per dev agent.
 - `last-wave-only`: only if this is the final wave (`W == total_W`). For any earlier wave, do NOT dispatch a verifier -- jump to "Unverified wave (SKIPPED)" below.
 
-**Dispatch a semantic verifier** via the registered subagent type `plan-runner:plan-verifier` (do NOT inline the agent file). Use `model: sonnet`. Build the per-invocation prompt with the `AGENTS IN THIS WAVE` block, varying only by mode:
+**Dispatch a semantic verifier** after reading `../../agents/plan-verifier.md` relative to this skill. Include the complete role definition in each verifier prompt. Prefer model `sonnet` when available. Build the per-invocation prompt with the `AGENTS IN THIS WAVE` block, varying only by mode:
 - `per-wave`, and the final wave under `last-wave-only`: include ALL dev agents in ONE verifier's `AGENTS IN THIS WAVE` block (the original single-verifier behavior).
 - `per-agent`: dispatch N verifiers, one per dev agent, each with a single-agent `AGENTS IN THIS WAVE` block containing only that agent. Label each `wave-<W>-agent-<n>-verifier`.
 
@@ -568,7 +573,7 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
 
 **Backend `subagent` (default):** dispatch each verifier as a background task and wait for its completion notification. Collect each return JSON.
 
-**Backend `teams`:** each verifier runs as a teammate (or a plain subagent referencing the type). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Deterministically poll the verifier's task result / mailbox with a generous bounded wait, re-reading each until the bug-report JSON (its final message) is retrieved. Read the verdict from the task result, not by inferring it.
+**Backend `teams`:** each verifier runs as a teammate (or a plain subagent receiving the bundled role definition). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Deterministically poll the verifier's task result / mailbox with a generous bounded wait, re-reading each until the bug-report JSON (its final message) is retrieved. Read the verdict from the task result, not by inferring it.
 
 **No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for a verifier's report, and MUST NOT advance to 4c / 4e / Step 5 / Step 8 until every dispatched verifier's report is in hand. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: the missing verdict flows into 4c as `UNVERIFIABLE` so the gap routes through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
 
@@ -596,7 +601,7 @@ Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
 
 Capture each dispatched verifier's token usage (see **Token accounting**). Each verifier's bug-report JSON carries a `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure (do not copy the field into the wave's bug JSON). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
 
-**Tear down the wave verifier(s).** Each dispatched verifier's report is now captured -- release it the same way as the dev agents in 4a-bis: `TaskStop` on its background `task_id` (subagent backend) or its teammate agent ID / name (teams backend). For a `per-agent` wave, tear down every verifier. A SKIPPED wave has no verifier to tear down. Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, `UNVERIFIABLE`, or `SKIPPED`).
+**Tear down the wave verifier(s).** Each dispatched verifier's report is now captured -- release it with the host-native stop facility if it remains resident, or stop its teammate agent ID/name on the teams backend. For a `per-agent` wave, tear down every verifier. A SKIPPED wave has no verifier to tear down. Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, `UNVERIFIABLE`, or `SKIPPED`).
 
 ### 4d. Render wave dashboard
 
@@ -725,7 +730,7 @@ If total bugs > 0:
 [Phase 3/4] Aggregating <N> bugs across <W> waves...
 ```
 
-Dispatch ONE aggregator via the **registered subagent type `plan-runner:plan-aggregator`** (foreground, model: sonnet; do NOT inline the agent file). Pass only the per-invocation parameters:
+Read `../../agents/plan-aggregator.md` relative to this skill, then dispatch one foreground aggregator with the complete role definition and these per-invocation parameters. Prefer model `sonnet` when available:
 
 ```
 You are being deployed as the plan-aggregator for plan-runner cycle <cycle_n>.
@@ -785,8 +790,8 @@ Then prompt:
 
 ```
 Run plan-runner again with the generated fix-plan to address these bugs?
-[Y] = auto-handoff to fresh-context subagent running /plan-runner:run <fix-plan.md>
-[n] = stop here (you can resume later with the same command)
+[Y] = auto-handoff to a fresh-context subagent running the Plan Runner run skill on <fix-plan.md>
+[n] = stop here (you can resume later with the same skill invocation)
 
 (Y/n)
 ```
@@ -795,14 +800,14 @@ If `n`: print `Stopping fix-plan re-run. Proceeding to code-atlas sync + PR step
 
 If `Y` (or empty default), the re-run mechanism depends on `backend`:
 
-**Backend `subagent`:** dispatch a `general-purpose` Agent with this self-contained prompt:
+**Backend `subagent`:** resolve this active `SKILL.md` to an absolute path, then dispatch a fresh-context general subagent with this self-contained prompt:
 
 ```
-You are executing the plan-runner:run skill in a fresh session.
+You are executing the Plan Runner run skill in a fresh session.
 
-Invoke the Skill tool with:
-  skill: "plan-runner:run"
-  args: "<absolute path to fix-plan.md> --verify <verify_mode>"
+Read the complete skill instructions at <absolute path to this run SKILL.md>.
+Treat them as the active instructions and execute them with this invocation input:
+  <absolute path to fix-plan.md> --verify <verify_mode>
 
 The fix-plan file already exists on disk. Read it fresh. Follow the skill exactly.
 
@@ -846,7 +851,7 @@ Do NOT run any command. Proceed to Step 8.
 
 ### 7-bis.b. Detect code-atlas
 
-Check whether `.code-atlas/state.json` exists (use Glob, or `test -f .code-atlas/state.json` via Bash). This file exists only when code-atlas is installed AND has already been initialized with `/code-atlas:map`.
+Check whether `.code-atlas/state.json` exists with available filesystem or shell tools. This file exists only when code-atlas is installed AND has already been initialized with its map skill.
 
 If it does NOT exist, skip: set `code_atlas_sync = {"ran": false, "reason": "code-atlas not detected"}` in the manifest and print:
 
@@ -854,7 +859,7 @@ If it does NOT exist, skip: set `code_atlas_sync = {"ran": false, "reason": "cod
 code-atlas not detected (.code-atlas/state.json absent) -- skipping architecture index sync.
 ```
 
-Then proceed to Step 8. Do NOT auto-run `/code-atlas:map` (a full map is expensive and the user never opted in).
+Then proceed to Step 8. Do NOT auto-run the Code Atlas map skill (a full map is expensive and the user never opted in).
 
 ### 7-bis.c. Run the incremental update
 
@@ -864,12 +869,7 @@ If `.code-atlas/state.json` exists, print:
 code-atlas detected -- syncing architecture index with this cycle's changes...
 ```
 
-Invoke the Skill tool with:
-
-```
-  skill: "code-atlas:update"
-  args: ""
-```
+Invoke the Code Atlas update skill with no arguments using the host's native skill mechanism. If the skill is not installed or cannot be invoked, record `code_atlas_sync = {"ran": false, "reason": "code-atlas update skill unavailable"}` and continue without failing the Plan Runner cycle.
 
 Pass NO arguments. The update auto-selects its depth (micro / targeted / full) from the
 size of the committed change set -- a small plan stays cheap; a large one re-scans as
@@ -887,7 +887,7 @@ Git not available -- skipping the PR step. Review the generated artifacts in the
 cycle directory: <cycle_dir>.
 ```
 
-Then proceed to the End-of-run Run Report (terminal print) and STOP. Do NOT invoke the `plan-runner:pr` skill.
+Then proceed to the End-of-run Run Report (terminal print) and STOP. Do NOT invoke the Plan Runner PR skill.
 
 Otherwise (git is available):
 
@@ -898,15 +898,9 @@ the cycle directory (the `$cycle_dir` from Step 1b resolved to an absolute path)
 realpath "$cycle_dir"
 ```
 
-Capture as `cycle_dir_abs`. Then invoke the Skill tool:
+Capture as `cycle_dir_abs`. Resolve `../pr/SKILL.md` relative to this file and either invoke the registered Plan Runner PR skill or read and execute that sibling skill directly with `cycle_dir_abs` as its invocation input.
 
-```
-Invoke the Skill tool with:
-  skill: "plan-runner:pr"
-  args: "<cycle_dir_abs>"
-```
-
-The `plan-runner:pr` skill reads `manifest.json`, `wave-plan.json`, and the bug JSONs
+The Plan Runner PR skill reads `manifest.json`, `wave-plan.json`, and the bug JSONs
 from that directory, pushes the current branch, and creates or updates the pull
 request (conventional title, rich body, draft when bugs remain). When it returns,
 print its confirmation line verbatim, then proceed to the End-of-run Run Report (terminal print) and STOP.

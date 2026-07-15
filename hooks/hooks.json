@@ -1,5 +1,5 @@
 {
-  "description": "plan-runner SessionStart hook: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed. The logic is inlined via node -e (no file paths, no ${CLAUDE_PLUGIN_ROOT}) so it works even on builds where the plugin-root variable is not substituted for SessionStart hooks.",
+  "description": "Plan Runner SessionStart hook for Claude Code and Codex: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed. The logic is inlined via node -e and does not depend on a plugin-root variable.",
   "hooks": {
     "SessionStart": [
       {

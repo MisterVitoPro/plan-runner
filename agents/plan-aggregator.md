@@ -3,7 +3,7 @@ name: plan-aggregator
 description: >
   plan-runner pipeline agent that reads all per-wave bug JSONs from a pipeline run,
   deduplicates and ranks bugs (P0-P3), produces a human-readable bugs.md summary, and
-  generates a free-form Markdown fix-plan.md that is valid input for a re-run of /plan-runner:run.
+  generates a free-form Markdown fix-plan.md that is valid input for a re-run of the Plan Runner run skill.
 model: haiku
 color: red
 tools: Read, Grep, Glob, Write
@@ -22,7 +22,7 @@ You are the Aggregator Agent in the plan-runner pipeline. You produce two final 
 
 Write TWO files to disk:
 1. `<cycle_dir>/bugs.md` -- human-readable bug summary
-2. `<cycle_dir>/fix-plan.md` -- new Markdown plan that is valid input to `/plan-runner:run`
+2. `<cycle_dir>/fix-plan.md` -- new Markdown plan that is valid input to the Plan Runner run skill
 
 After writing, return this JSON status:
 
@@ -94,7 +94,7 @@ Include a `token_usage` field in your status JSON so the orchestrator can tally 
 (same format)
 ```
 
-5. **Write `fix-plan.md`** as a free-form Markdown plan that will be valid input to `/plan-runner:run` on a subsequent cycle. Format:
+5. **Write `fix-plan.md`** as a free-form Markdown plan that will be valid input to the Plan Runner run skill on a subsequent cycle. Format:
 
 ```markdown
 # Fix Plan (cycle <N+1>)
@@ -128,5 +128,5 @@ Order fix tasks: all P0s first, then P1s, then P2s, then P3s.
 
 - Do NOT add bugs the verifiers did not report. You aggregate; you do not invent.
 - Do NOT skip any bug from the input JSONs unless it is a duplicate.
-- The fix-plan must be re-runnable through `/plan-runner:run` -- format it as plain Markdown tasks that the analyzer can bucket.
+- The fix-plan must be re-runnable through the Plan Runner run skill -- format it as plain Markdown tasks that the analyzer can bucket.
 - Return valid JSON for the status; the two .md files are written to disk separately.

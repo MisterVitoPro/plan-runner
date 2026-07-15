@@ -2,8 +2,9 @@ name: Marketplace pin
 
 # On every push to main, if this push bumped the plugin version (a release
 # merge), tag the merge commit v<version> and update the marketplace entry in
-# MisterVitoPro/qa-claude-market to pin the new ref + sha (and sync the
-# description). Ordinary merges that do not touch the version are a no-op.
+# MisterVitoPro/qa-claude-market to pin the new ref + sha in both the Claude
+# Code and Codex catalogs (and sync the Claude description). Ordinary merges
+# that do not touch the version are a no-op.
 #
 # Requires a repo secret MARKETPLACE_DEPLOY_KEY: the private half of an SSH
 # deploy key registered with write access on MisterVitoPro/qa-claude-market.
@@ -36,6 +37,11 @@ jobs:
         id: ver
         run: |
           NEW=$(jq -r .version .claude-plugin/plugin.json)
+          CODEX=$(jq -r .version .codex-plugin/plugin.json)
+          if [ "$NEW" != "$CODEX" ]; then
+            echo "Claude and Codex manifest versions differ: $NEW vs $CODEX" >&2
+            exit 1
+          fi
           OLD=$(git show HEAD~1:.claude-plugin/plugin.json 2>/dev/null | jq -r .version || echo none)
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           if [ "$NEW" = "$OLD" ]; then
@@ -74,24 +80,31 @@ jobs:
           TAG="v${{ steps.ver.outputs.new }}"
           SHA="${{ github.sha }}"
           DESC=$(jq -r .description .claude-plugin/plugin.json)
-          FILE=market/.claude-plugin/marketplace.json
+          CLAUDE_FILE=market/.claude-plugin/marketplace.json
+          CODEX_FILE=market/.agents/plugins/marketplace.json
 
           jq --arg ref "$TAG" --arg sha "$SHA" --arg desc "$DESC" '
               (.plugins[] | select(.name=="plan-runner").source.ref) = $ref
             | (.plugins[] | select(.name=="plan-runner").source.sha) = $sha
             | (.plugins[] | select(.name=="plan-runner").description)  = $desc
-          ' "$FILE" > "$FILE.tmp"
-          mv "$FILE.tmp" "$FILE"
+          ' "$CLAUDE_FILE" > "$CLAUDE_FILE.tmp"
+          mv "$CLAUDE_FILE.tmp" "$CLAUDE_FILE"
+
+          jq --arg ref "$TAG" --arg sha "$SHA" '
+              (.plugins[] | select(.name=="plan-runner").source.ref) = $ref
+            | (.plugins[] | select(.name=="plan-runner").source.sha) = $sha
+          ' "$CODEX_FILE" > "$CODEX_FILE.tmp"
+          mv "$CODEX_FILE.tmp" "$CODEX_FILE"
 
           # Fail fast if the edit produced invalid JSON.
-          node -e "JSON.parse(require('fs').readFileSync('$FILE','utf8'))"
+          node -e "for (const f of ['$CLAUDE_FILE', '$CODEX_FILE']) JSON.parse(require('fs').readFileSync(f,'utf8'))"
 
           if git -C market diff --quiet; then
             echo "Marketplace already pins $TAG @ $SHA -- nothing to commit."
           else
             git -C market config user.name  "github-actions[bot]"
             git -C market config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C market add .claude-plugin/marketplace.json
+            git -C market add .claude-plugin/marketplace.json .agents/plugins/marketplace.json
             git -C market commit -m "chore: pin plan-runner $TAG ($SHA)"
             git -C market push origin HEAD:main
           fi
