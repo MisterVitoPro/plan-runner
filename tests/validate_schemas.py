@@ -17,6 +17,7 @@ CASES = [
     ("wave-plan.schema.json", "wave-plan-valid.json", "wave-plan-invalid.json"),
     ("dev-return.schema.json", "dev-return-valid.json", "dev-return-invalid.json"),
     ("manifest.schema.json", "manifest-valid.json", "manifest-invalid.json"),
+    ("run-state.schema.json", "run-state.valid.json", "run-state.invalid.json"),
 ]
 
 

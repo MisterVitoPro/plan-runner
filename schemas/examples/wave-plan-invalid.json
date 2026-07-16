@@ -4,13 +4,18 @@
   "waves": [
     {
       "wave_id": 1,
+      "rationale": "Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. Repeating text over and over again to ensure we cross the 2000 character threshold. ",
       "agents": [
         {
           "agent_id": "wave-1-agent-1",
           "task_title": "write tests for adder",
           "task_excerpt_lines": "10-20",
-          "owned_files": ["tests/adder.test.js"],
-          "acceptance_criteria": ["covers add(2,3) == 5"],
+          "owned_files": [
+            "tests/adder.test.js"
+          ],
+          "acceptance_criteria": [
+            "covers add(2,3) == 5"
+          ],
           "recommended_model": "sonnet",
           "role": "implementer"
         }
@@ -18,5 +23,9 @@
     }
   ],
   "uncovered_plan_sections": [],
-  "token_usage": {"input": null, "output": null, "total": "about 12k"}
+  "token_usage": {
+    "input": null,
+    "output": null,
+    "total": "about 12k"
+  }
 }
