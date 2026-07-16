@@ -20,6 +20,8 @@ Follow this pipeline exactly. Do not skip steps.
 
 ## Argument parsing
 
+**Internal phase-runner form (relay only).** If the invocation input begins with `--phase-runner <run-state path> --phase <P>`, this is not a normal run: a relay driver dispatched you (Step 3-bis.2) to execute one phase in a fresh context. Capture `run_state_path = <run-state path>` and `phase_runner_id = <P>`, set `is_phase_runner = true`, and do NOT tokenize for a plan path or parse any other flag -- skip pre-flight, analysis, and slicing (all state is already on disk) and jump straight to Step 3-bis.0, which loads everything else from the run-state. For every other invocation set `is_phase_runner = false` and continue below.
+
 Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path. Flags:
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
@@ -123,6 +125,8 @@ Rendering rules:
 - **Artifacts** always lists `Manifest`; it adds `Bug report` and `Fix plan` rows only when `total_bugs > 0`.
 
 ## Step 1: PRE-FLIGHT
+
+If `is_phase_runner` is true, this invocation is a relay phase-runner: skip Steps 1, 2, 2-bis, and 3 entirely (all state is already on disk from the driver's slicing) and execute Step 3-bis.0 directly.
 
 Record the pipeline start time: `t_start = $(date +%s)`.
 
@@ -322,7 +326,7 @@ Resolve each setting in precedence order **flag > yml > default** (the same prec
 
 - `phasing_enabled`: `false` if `no_phasing_flag` is true (the kill-switch wins over everything); otherwise the yml `phasing.enabled` value; otherwise `true`.
 - `max_waves_per_phase`: `phase_size_flag` if set; otherwise the yml `phasing.max_waves_per_phase` value; otherwise `4`. Must be an integer >= 1; if the resolved value is not a positive integer, print an error and STOP.
-- `phase_mode`: `phase_mode_flag` if set; otherwise the yml `phasing.mode` value; otherwise `auto`. Validate against {`relay`, `stop`, `auto`}; if it is anything else, print an error and STOP. (`auto` resolves to `relay` or `stop` per phase count during execution -- Step 5's adaptive resolution; slicing itself is mode-independent.)
+- `phase_mode`: `phase_mode_flag` if set; otherwise the yml `phasing.mode` value; otherwise `auto`. Validate against {`relay`, `stop`, `auto`}; if it is anything else, print an error and STOP. (`auto` resolves to `relay` or `stop` per phase count during execution -- Step 3-bis's adaptive resolution; slicing itself is mode-independent.)
 - `auto_stop_phases`: the yml `phasing.auto_stop_phases` value; otherwise `3`.
 - `relay_max_minutes`: the yml `phasing.relay_max_minutes` value; otherwise `90`.
 
@@ -521,7 +525,7 @@ Checkpoint: <cycle_dir>/run-state.json
 
 Then proceed to Step 3.
 
-> Mode execution (relay driver vs. stop boundaries vs. adaptive resolution and the wall-time guardrail) is Step 5. This step only slices, lays out the directories, and writes the checkpoint.
+> Mode execution (relay driver vs. stop boundaries vs. adaptive resolution and the wall-time guardrail) is Step 3-bis. This step only slices, lays out the directories, and writes the checkpoint.
 
 ## Step 3: DISPLAY WAVE PLAN
 
@@ -553,13 +557,133 @@ Proceed automatically without waiting for user input.
 
 Record `t_confirmed = $(date +%s)`.
 
-(Continued in Step 4: WAVE EXECUTION)
+(Continued in Step 3-bis: PHASE EXECUTION, then Step 4: WAVE EXECUTION)
+
+## Step 3-bis: PHASE EXECUTION (driver, modes, and boundaries)
+
+This step is the phase driver. It runs after the wave plan is displayed (Step 3) and decides how the sliced phases execute: it resolves `phase_mode` to an effective mode and hosts the relay loop, the stop boundaries, and the wall-time guardrail. Per-wave behavior never changes here -- every phase runs the existing Step 4 wave loop unchanged (barrier, gates, verification per `verify_mode`, teardown, commit, manifest); this step only orchestrates *which session* runs *which phase* and *what happens at each phase boundary*.
+
+**Unphased passthrough.** If `phasing_active` is false (Step 2-bis left the run unphased -- every `--no-phasing` run and every sub-threshold run), this step is a no-op: proceed directly to Step 4 and run all `W` waves in this one session exactly as today. Nothing below applies, so the sub-threshold and `--no-phasing` paths stay byte-for-byte today's pipeline.
+
+Otherwise `phasing_active` is true -- continue.
+
+### 3-bis.0. Phase-runner entry (relay subagents only)
+
+Reached when THIS invocation is a relay phase-runner -- `is_phase_runner` is true because a driver dispatched you with the internal input `--phase-runner <run-state path> --phase <P>` (Step 3-bis.2). You are NOT the driver: do not slice, do not resolve modes, do not aggregate, do not run any terminal step.
+
+1. Read `run_state_path`. It already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt).
+2. Read that phase's wave-plan slice from `<phase_dir>/wave-plan.json`.
+3. Execute Step 4 over this phase's wave range only. The full per-wave barrier, gates, verification, bug JSON, dashboard, commit, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
+4. When the phase's last wave finishes its Step 4f, do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
+
+Phase-summary return -- the ONLY thing the driver receives (never per-wave agent returns or transcripts); keep it within the ~1-2k-token return budget and point at the manifest for detail:
+
+```json
+{
+  "phase_id": <P>,
+  "wave_range": "<global range, e.g. 5-8>",
+  "waves": [{"wave_id": <W>, "verifier_status": "<status>", "bug_count": <n>, "commit_sha": "<sha or null>"}],
+  "phase_bug_count": <sum of this phase's wave bug counts>,
+  "token_usage": {"total_tokens": <sum of non-null totals>, "agents_reported": <n>, "agents_total": <n>, "complete": <bool>},
+  "manifest_path": "<absolute path to this phase's manifest.json>",
+  "status": "complete | interrupted"
+}
+```
+
+`status` is `interrupted` only if a wave could not complete; run-state (written per wave in Step 4f) still records the last completed wave, so the driver applies the normal resume path. Never inline wave-level data -- point at `manifest_path`.
+
+### 3-bis.1. Resolve the effective execution mode
+
+`phase_mode` (from Step 1d-quinquies) is `relay`, `stop`, or `auto`. Resolve the mode that governs this run, in this precedence:
+
+1. **Teams-backend override (wins over everything, including an explicit `relay`).** If `backend == "teams"`, set `effective_mode = "stop"` regardless of `phase_mode`. A teammate cannot spawn a nested team, so a phase-runner subagent cannot lead one and relay is impossible on this backend (ADR-0003). Print the one-line explanation:
+
+   `Agent Teams backend: forcing stop mode at every phase boundary (a phase-runner cannot lead a nested team).`
+
+2. **Explicit mode.** Else if `phase_mode` is `relay` or `stop`, set `effective_mode = phase_mode` (a flag or the yml chose it explicitly).
+
+3. **Adaptive default.** Else (`phase_mode == "auto"` -- no explicit mode configured), resolve by the sliced `phase_count`:
+   - If `phase_count > auto_stop_phases`: `effective_mode = "stop"` -- the large plans that motivate phasing default to the full process reset.
+   - Else (`phase_count <= auto_stop_phases`): `effective_mode = "relay"`.
+
+   Print the one-line explanation, exactly one of:
+
+   `Adaptive mode: <phase_count> phases <= auto_stop_phases (<auto_stop_phases>) -- relaying (context reset per phase).`
+   `Adaptive mode: <phase_count> phases > auto_stop_phases (<auto_stop_phases>) -- stopping at each boundary (full process reset).`
+
+Store `effective_mode`. Branch: `relay` -> 3-bis.2; `stop` -> 3-bis.3.
+
+### 3-bis.2. Relay mode -- phase-driver loop
+
+The invoking session is a thin driver. In relay mode it NEVER runs wave execution itself; each phase runs in its own fresh-context phase-runner subagent, and the driver holds only run-state pointers plus one phase summary at a time. Driver-side nesting stays at a constant depth regardless of `phase_count` (driver -> phase runner -> dev agents), never a phase-to-phase chain -- a chain would nest one level per phase and hit the platform's depth cap on large runs (ADR-0003).
+
+Resolve this active `SKILL.md` to an absolute path once. Then, for each phase `P` in `1..phase_count` in order (skip any phase already `complete` in run-state):
+
+1. **Guardrail check at the boundary.** Before dispatching phase `P` when `P > 1` (i.e. at each phase boundary), apply the relay wall-time guardrail (3-bis.4). If it trips, force a stop boundary here and end the session -- do NOT dispatch the next phase.
+2. Dispatch a fresh-context general subagent -- the same self-contained handoff mechanism as the Step 6 fix-plan re-run -- with this prompt:
+
+```
+You are executing the Plan Runner run skill as a phase runner in a fresh session.
+
+Read the complete skill instructions at <absolute path to this run SKILL.md>.
+Treat them as the active instructions and execute them with this invocation input:
+  --phase-runner <absolute run-state path> --phase <P>
+
+Everything else -- the wave-plan slice, verify mode, backend, TDD state, phase
+directory -- is already on disk in the run-state and the phase directory. Read it fresh.
+Run only phase <P>'s waves (Step 3-bis.0), then return the single phase-summary JSON.
+Do not aggregate, do not open a PR, do not run any terminal step.
+```
+
+3. Wait for the phase-runner to return. Parse its phase-summary JSON. If it does not parse, or `status` is `interrupted`, treat the phase as interrupted: run-state already records the last completed wave, so offer resume in-session or stop with the resume invocation (the resume path). Do NOT drive later phases over an interrupted one.
+4. Record the phase summary (waves, bug count, token tally with coverage, `manifest_path`) for the terminal Run Report, which sums across the per-phase manifests (Step 7). The driver keeps ONLY this summary -- never the phase's per-wave agent returns or transcripts.
+5. Tear down the phase-runner subagent with the host-native stop facility once its summary is captured; it must not idle after returning.
+6. Print the compact intermediate phase summary (waves run, bugs so far, tokens with coverage, next action) and continue to phase `P+1`.
+
+After the terminal phase's runner returns (and the guardrail has not tripped), proceed to Step 5 for cross-phase aggregation over every phase's `bugs/` directory. The driver never dispatched a dev agent or verifier itself, so it carries no wave-level context into aggregation.
+
+### 3-bis.3. Stop mode -- clean session boundaries
+
+Stop mode fully resets the host process at each boundary: each session runs exactly ONE phase directly in its own context, then ends the session, and a fresh OS process resumes the next phase. This is the complete memory fix -- relay resets context but not host-process heap; stop resets both -- and is what the teams backend and large runs use.
+
+In this session, execute the first phase whose run-state `status` is not `complete` (on the initial run that is phase 1; on a resumed session the resume path selects it):
+
+1. Run Step 4 over that phase's wave range only, directly in this session -- the full per-wave barrier, gates, verification, teardown, commit, and per-wave manifest + run-state updates, unchanged -- writing every artifact to that phase's `phase_dir`.
+2. When the phase's last wave completes, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 7); confirm it reflects the boundary before ending.
+3. Then:
+   - **More phases remain:** print the compact phase summary followed by a copy-pasteable resume invocation, and end the session cleanly (STOP). Do NOT run Step 5 or any terminal step -- the fresh resumed process runs the next phase.
+
+```
+Phase <P>/<phase_count> complete. Stopping here for a full process reset before phase <P+1>.
+Resume with:
+  Claude Code:  /plan-runner:run --resume <absolute run-state path>
+  Codex:        $plan-runner:run --resume <absolute run-state path>
+```
+
+   - **Terminal phase just completed:** do NOT stop. Proceed to Step 5 for cross-phase aggregation, then the terminal steps (Step 7-bis, Step 8, Run Report) run in this session exactly as on an unphased run. Step 5 reads every phase's bug JSONs from disk, so it needs no earlier-phase context.
+
+The `--resume` flag, pre-flight auto-detect, and crash recovery that re-enter at the selected phase are the resume machinery; a stop boundary here only ensures run-state is current and prints the invocation. The guardrail-forced stop (3-bis.4) reuses this exact boundary and invocation.
+
+### 3-bis.4. Relay wall-time guardrail
+
+Relay keeps the driver's context lean but does NOT reset the host process, so a long relay run can still creep toward the process-memory envelope. Bound it by wall-time, not by hoping payload caps suffice. While relaying (3-bis.2), at every phase boundary -- after phase `P` completes and before dispatching phase `P+1` -- compare elapsed wall-time since this session's run start (`t_start`, Step 1) against `relay_max_minutes`:
+
+- If `(now - t_start)` in minutes is `<= relay_max_minutes`: continue to the next phase's relay dispatch.
+- If it exceeds `relay_max_minutes`: force a **stop-and-resume** at this boundary. This is an early stop boundary that reuses the stop machinery (3-bis.3): run-state is already current (written per wave and at the boundary), so print the reason and the copy-pasteable resume invocation and end the session (STOP). The fresh resumed process continues from phase `P+1`; its mode re-resolves, and if it relays again its own `t_start` restarts the guardrail clock.
+
+```
+Relay guardrail: <elapsed>m elapsed since run start exceeds relay_max_minutes (<relay_max_minutes>m).
+Forcing a stop at the phase <P>/<phase_count> boundary for a full process reset.
+Resume with:
+  Claude Code:  /plan-runner:run --resume <absolute run-state path>
+  Codex:        $plan-runner:run --resume <absolute run-state path>
+```
 
 ## Step 4: WAVE EXECUTION
 
 Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
 
-For each wave in `wave_plan.waves` (sequentially):
+For each wave in the active phase's wave range (sequentially) -- for an unphased run that is all of `wave_plan.waves`; inside a phase (a relay phase-runner or a stop-mode session) it is only that phase's wave-plan slice, so Step 4 iterates the current phase's waves and no others:
 
 Print:
 ```
@@ -825,7 +949,7 @@ Use Read+Write or jq to update the manifest in place. If jq is unavailable, read
 
 Record `t_wave_<W>_end = $(date +%s)`.
 
-Move to the next wave. After the last wave completes, proceed to Step 5.
+Move to the next wave. After the last wave of the range completes: on an unphased run, proceed to Step 5. Inside a phase (`phasing_active` is true), control returns to Step 3-bis at the phase boundary instead -- a relay phase-runner returns its phase-summary JSON (Step 3-bis.0), and a stop-mode session ends or, on the terminal phase, proceeds to Step 5 (Step 3-bis.3). Step 5 runs only once, on the terminal phase.
 
 ## Step 5: AGGREGATE
 
