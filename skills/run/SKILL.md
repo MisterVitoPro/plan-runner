@@ -25,8 +25,11 @@ Tokenize the skill invocation input on whitespace. The first non-flag token is t
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
 - `--verify <mode>` -- optional verification coverage mode: one of `per-agent`, `per-wave`, `last-wave-only`. Overrides `.plan-runner.yml`. When absent, the config file (or the `per-wave` default) decides. Capture its value as `verify_mode_flag` (unset if the flag is absent).
+- `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
+- `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
+- `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Strip all flags (including `--verify <mode>`) before using the plan path.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Strip all flags (including `--verify <mode>`, `--phase-size <N>`, `--phase-mode <mode>`, and `--no-phasing`) before using the plan path.
 
 ## Timing
 
@@ -300,6 +303,39 @@ Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4b / Step 5
 - `per-agent`: one verifier per dev agent, every wave (highest scrutiny/cost).
 - `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4c) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
 
+### 1d-quinquies. Resolve phasing config
+
+Large plans (40+ tasks, ~10-15 waves) run today in one long-lived orchestrator session whose host-process memory is never freed, which crashes constrained machines. Phasing splits an oversized wave plan into sequential phases, each executed with a fresh context. Resolve the phasing configuration now; the actual slicing happens in Step 2-bis once the wave count is known.
+
+`.plan-runner.yml` MAY carry a `phasing` block:
+
+```yaml
+phasing:
+  enabled: true            # default true
+  max_waves_per_phase: 4   # default 4
+  mode: auto               # auto (default) | relay | stop
+  auto_stop_phases: 3      # auto mode: relay up to this many phases, stop above
+  relay_max_minutes: 90    # relay guardrail: force stop at the next boundary past this
+```
+
+Resolve each setting in precedence order **flag > yml > default** (the same precedence pattern as `--verify`). Extract each key directly with the Read tool -- do NOT depend on a YAML parser being installed, exactly as Step 1d-quater extracts `verification.mode`. A missing file, a missing key, or an unreadable file falls through to the default.
+
+- `phasing_enabled`: `false` if `no_phasing_flag` is true (the kill-switch wins over everything); otherwise the yml `phasing.enabled` value; otherwise `true`.
+- `max_waves_per_phase`: `phase_size_flag` if set; otherwise the yml `phasing.max_waves_per_phase` value; otherwise `4`. Must be an integer >= 1; if the resolved value is not a positive integer, print an error and STOP.
+- `phase_mode`: `phase_mode_flag` if set; otherwise the yml `phasing.mode` value; otherwise `auto`. Validate against {`relay`, `stop`, `auto`}; if it is anything else, print an error and STOP. (`auto` resolves to `relay` or `stop` per phase count during execution -- Step 5's adaptive resolution; slicing itself is mode-independent.)
+- `auto_stop_phases`: the yml `phasing.auto_stop_phases` value; otherwise `3`.
+- `relay_max_minutes`: the yml `phasing.relay_max_minutes` value; otherwise `90`.
+
+Print the resolved config and its trigger threshold:
+
+    Phasing: <enabled|disabled>. Threshold: >4 waves (max_waves_per_phase=<max_waves_per_phase>), mode=<phase_mode>.
+
+When `phasing_enabled` is false, print instead:
+
+    Phasing disabled (--no-phasing or phasing.enabled: false) -- running the whole plan in one session.
+
+Store `phasing_enabled`, `max_waves_per_phase`, `phase_mode`, `auto_stop_phases`, and `relay_max_minutes` for Step 2-bis (slicing) and for the run-state checkpoint.
+
 ### 1e. Initialize manifest
 
 Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
@@ -393,6 +429,99 @@ Write the wave plan to `$cycle_dir/wave-plan.json`.
 Capture the analyzer's token usage (see **Token accounting**) and append it to `token_usage.by_agent` as `{"agent": "analyzer", "phase": "analyze", ...}`. The analyzer's return carries a top-level `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure.
 
 Record `t_analyze_done = $(date +%s)`.
+
+## Step 2-bis: SLICE INTO PHASES
+
+Slicing is mechanical arithmetic on the already-validated wave plan. The analyzer is NOT re-dispatched and `agents/plan-analyzer.md` is untouched -- wave order is topological, so any split into consecutive-wave ranges is dependency-safe by construction.
+
+Let `W` = the number of waves in `wave_plan.waves`.
+
+**Unphased path (byte-for-byte today's pipeline).** If `phasing_enabled` is false (including whenever `--no-phasing` was passed), OR `W <= max_waves_per_phase`, then phasing does not activate:
+
+- Set `phasing_active = false` and `phase_dir = $cycle_dir`.
+- Do NOT create any `phase-*/` directory. Do NOT write `run-state.json`.
+- The run proceeds exactly as it does today: one session, the flat `cycle-<N>/` layout, Step 4 iterating all `W` waves, Step 5 aggregating `$cycle_dir/bugs/`. Nothing below in this step runs.
+- Print: `Plan fits in one phase (<W> waves <= <max_waves_per_phase>) -- running unphased.` (omit this line entirely when `phasing_enabled` is false, since Step 1d-quinquies already announced that phasing is off).
+
+Then proceed to Step 3.
+
+**Phased path.** Otherwise (`phasing_enabled` is true AND `W > max_waves_per_phase`), set `phasing_active = true` and slice:
+
+1. `phase_count = ceil(W / max_waves_per_phase)`.
+2. Phase `P` (1-indexed, `1..phase_count`) owns the consecutive global waves `((P-1) * max_waves_per_phase) + 1` through `min(P * max_waves_per_phase, W)`. **Global wave numbering is preserved across phases** -- wave `<W>` keeps its number, so its bug JSON stays `wave-<W>.json` and manifests/run-state reference the global number. The last phase may be short.
+3. For each phase `P`, create its directory and per-phase `bugs/`:
+
+```bash
+mkdir -p "$cycle_dir/phase-$P/bugs"
+```
+
+   write that phase's wave-plan slice -- the sub-array of `wave_plan.waves` for its wave range, in the same shape as the canonical wave plan -- to `$cycle_dir/phase-$P/wave-plan.json`, and write a starter `$cycle_dir/phase-$P/manifest.json` using the **same template as Step 1e** (identical fields and starter values) plus one additive object `"phase": {"phase_id": <P>, "of": <phase_count>, "wave_range": "<this phase's global range>"}`. The `phase` object is additive and optional, so a phase manifest still satisfies the manifest schema's back-compat rule. During a phase's execution, Step 4 appends its wave entries to this per-phase manifest (that is what `phase_dir` resolves to); the cycle-root `manifest.json` written in Step 1e stays as the pre-slice starter, and terminal-phase reporting (Step 7) sums across the per-phase manifests.
+
+### Phase directory layout (phased runs only)
+
+```
+cycle-<N>/
+  wave-plan.json        # canonical full wave plan (Step 2, unchanged)
+  run-state.json        # the checkpoint (this step)
+  phase-1/
+    wave-plan.json      # this phase's wave slice
+    bugs/               # this phase's per-wave bug JSONs
+    manifest.json       # this phase's cycle-manifest (initialized at phase start)
+  phase-2/ ...
+  bugs.md               # terminal-phase aggregation output (cycle root)
+  fix-plan.md           # terminal-phase aggregation output (cycle root)
+```
+
+The canonical `wave-plan.json` stays at the cycle root. Each phase owns its slice, `bugs/`, and `manifest.json`. `phase_dir` names the active phase's directory (`$cycle_dir/phase-<P>/`) during that phase's execution; every per-wave write in Step 4 that targets `$cycle_dir/bugs/` or `$cycle_dir/manifest.json` resolves against `phase_dir` instead. For an unphased run `phase_dir` is `$cycle_dir`, so those same Step 4 paths are byte-for-byte unchanged.
+
+### Write the run-state checkpoint
+
+Before dispatching any dev agent, write `run-state.json` to the **cycle** directory (`$cycle_dir/run-state.json`) -- per-cycle, so a fix-plan re-run (a new cycle) phases and checkpoints independently. It conforms to `../../schemas/run-state.schema.json` and records:
+
+```json
+{
+  "plan_path": "<absolute path to the source plan>",
+  "plan_content_hash": "<SHA256 of the plan file contents>",
+  "invocation_flags": {
+    "phase_size": <phase_size_flag or null>,
+    "phase_mode": "<phase_mode>",
+    "phasing_enabled": <phasing_enabled>,
+    "no_phasing": <no_phasing_flag>
+  },
+  "backend": "<backend>",
+  "verify_mode": "<verify_mode>",
+  "tdd_enabled": <tdd_enabled>,
+  "phases": [
+    {"phase_id": 1, "wave_range": "1-<max_waves_per_phase>", "status": "pending", "directory": "<absolute path to cycle-<N>/phase-1>", "last_completed_wave": null}
+  ],
+  "overall_status": "active",
+  "updated_at": "<ISO 8601 from `date -Iseconds`>"
+}
+```
+
+Compute `plan_content_hash` with an available hashing tool (`sha256sum "<plan path>"`, `shasum -a 256 "<plan path>"`, or `certutil -hashfile "<plan path>" SHA256` on Windows), then normalize to the bare 64-character digest, lowercased with all whitespace stripped, so it matches the schema's `^[a-f0-9]{64}$` pattern (`certutil` emits uppercase with spaces). It guards resume against plan drift (Step 6 / resume compares it). List one `phases` entry per sliced phase, all `status: "pending"`, `last_completed_wave: null`; use each phase's absolute directory path and its global `wave_range` (e.g. `"1-4"`, `"5-8"`).
+
+### Run-state lifecycle
+
+`run-state.json` is the durable source of truth for stop/resume and crash recovery -- it is written and updated even in no-git mode (git-gated steps are skipped, but the checkpoint is not). Update it at exactly three points, always rewriting `updated_at`:
+
+1. **At slicing time (here):** the initial write above -- all phases `pending`, `overall_status: "active"`.
+2. **After every wave completion (Step 4f):** set the active phase's `last_completed_wave` to the just-finished global wave number and its `status` to `in_progress`.
+3. **At every phase boundary:** when a phase's last wave completes, set that phase's `status` to `complete`; set the next phase's `status` to `in_progress` (or, when the terminal phase of the terminal cycle finishes, set `overall_status` to `complete` in Step 7).
+
+Print the phase plan:
+
+```
+Phasing active: <W> waves sliced into <phase_count> phases of <=<max_waves_per_phase> waves.
+  Phase 1: waves 1-<n>
+  Phase 2: waves <n+1>-<m>
+  ...
+Checkpoint: <cycle_dir>/run-state.json
+```
+
+Then proceed to Step 3.
+
+> Mode execution (relay driver vs. stop boundaries vs. adaptive resolution and the wall-time guardrail) is Step 5. This step only slices, lays out the directories, and writes the checkpoint.
 
 ## Step 3: DISPLAY WAVE PLAN
 
@@ -597,7 +726,7 @@ Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
 {"wave_id": <W>, "verifier_status": "SKIPPED", "agent_statuses": {"<each agent_id>": "BUGS_FOUND if that agent's dev_status is BLOCKED else SKIPPED"}, "bugs": ["<the BLOCKED bugs synthesized in 4b, may be empty>"]}
 ```
 
-Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
+Write the JSON to `$phase_dir/bugs/wave-<W>.json`. (`phase_dir` is `$cycle_dir` for an unphased run and `$cycle_dir/phase-<P>/` for the active phase of a phased run -- see Step 2-bis. The bug JSON keeps the global wave number, so the filename is identical either way.)
 
 Capture each dispatched verifier's token usage (see **Token accounting**). Each verifier's bug-report JSON carries a `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure (do not copy the field into the wave's bug JSON). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
 
@@ -670,7 +799,7 @@ If n: STOP.
 
 ### 4f. Update manifest
 
-Append a wave entry to `$cycle_dir/manifest.json`:
+Append a wave entry to `$phase_dir/manifest.json` (`$cycle_dir/manifest.json` for an unphased run; the active phase's `$cycle_dir/phase-<P>/manifest.json` for a phased run):
 
 ```json
 {
@@ -691,6 +820,8 @@ Append a wave entry to `$cycle_dir/manifest.json`:
 The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the top-level `verification` counters: increment `waves_verified` when this wave got a semantic verifier, or `waves_skipped` when it was SKIPPED. Ensure `verification.waves_total` is set to the total wave count.
 
 Use Read+Write or jq to update the manifest in place. If jq is unavailable, read the JSON, mutate it in memory, write it back.
+
+**Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 7). This per-wave write is what makes crash recovery granular to the wave, with or without git.
 
 Record `t_wave_<W>_end = $(date +%s)`.
 
