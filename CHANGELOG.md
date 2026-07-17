@@ -2,6 +2,16 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.13.0 - 2026-07-16
+
+- **Phasing for large plans.** A sliced wave plan with more waves than `phasing.max_waves_per_phase` (default `4`) now runs as sequential phases instead of one long-lived orchestrator session, so host-process memory can be reclaimed at phase boundaries. Configurable in `.plan-runner.yml` (`phasing.enabled`, `max_waves_per_phase`, `mode`, `auto_stop_phases`, `relay_max_minutes`) or per-run via `--phase-size`, `--phase-mode`, and the `--no-phasing` kill switch; precedence is flag > file > default. Below the threshold, or with phasing disabled, nothing changes -- no phase directories, no run-state file.
+- **Relay vs. stop.** `relay` mode keeps a driver session alive across phase boundaries, dispatching each phase as its own subagent and keeping only a compact per-phase summary in context; `stop` mode ends the session at each phase boundary and picks the next phase up via `--resume` in a fresh process, resetting both context and host-process heap. Only `stop` fully resets process memory.
+- **Adaptive mode.** With `mode: auto` (the default), plan-runner relays while the sliced phase count is at or under `auto_stop_phases` (default `3`) and switches to `stop` above it. The Agent Teams backend always uses `stop`, since a teammate cannot spawn a nested team to lead a relay.
+- **Relay guardrail.** A relay run is additionally bounded by wall time: if elapsed time since the run started exceeds `relay_max_minutes` (default `90`) at a phase boundary, plan-runner forces a stop-and-resume there instead of continuing to relay.
+- **Resume and crash recovery.** Every phased run checkpoints to a `run-state.json` at the cycle root, updated after every wave. `--resume [path]` resumes a specific checkpoint, or (bare) the most recently updated resumable run found under `docs/plan-runner/**/run-state.json`. A fresh invocation auto-detects an incomplete run-state and offers to resume before starting a new run. Resume always re-enters at the last completed wave -- it never assumes partial or uncommitted work from an interrupted wave is done -- and warns (requiring confirmation) if the plan file's content hash has changed since checkpointing. Unphased runs write no run-state and are never resumable.
+- **Agent return budgets.** `dev-return`, `bug-report`, and `wave-plan` free-text fields (`summary`, `concerns`, bug `title`/`evidence`/`expected`/`suggested_fix`, wave `rationale`/`complexity_signals`, etc.) now carry `maxLength` caps to bound per-agent return payload size; pre-1.13.0 artifacts without these caps still validate.
+- Schemas: new `run-state.schema.json` (phase/wave checkpoint state) with matching valid/invalid fixtures.
+
 ## 1.12.0 - 2026-07-14
 
 - Added a Codex plugin manifest while keeping the Claude Code manifest and shared skill source intact.
