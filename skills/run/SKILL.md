@@ -22,7 +22,7 @@ Follow this pipeline exactly. Do not skip steps.
 
 **Internal phase-runner form (relay only).** If the invocation input begins with `--phase-runner <run-state path> --phase <P>`, this is not a normal run: a relay driver dispatched you (Step 3-bis.2) to execute one phase in a fresh context. Capture `run_state_path = <run-state path>` and `phase_runner_id = <P>`, set `is_phase_runner = true`, and do NOT tokenize for a plan path or parse any other flag -- skip pre-flight, analysis, and slicing (all state is already on disk) and jump straight to Step 3-bis.0, which loads everything else from the run-state. For every other invocation set `is_phase_runner = false` and continue below.
 
-Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path. Flags:
+Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path (except for a `--resume` invocation, which carries no plan path -- state comes from the run-state; see the `--resume` flag below). Flags:
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
@@ -30,8 +30,9 @@ Tokenize the skill invocation input on whitespace. The first non-flag token is t
 - `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
 - `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
 - `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
+- `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under `docs/plan-runner/`. A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Strip all flags (including `--verify <mode>`, `--phase-size <N>`, `--phase-mode <mode>`, and `--no-phasing`) before using the plan path.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
 
 ## Timing
 
@@ -128,7 +129,13 @@ Rendering rules:
 
 If `is_phase_runner` is true, this invocation is a relay phase-runner: skip Steps 1, 2, 2-bis, and 3 entirely (all state is already on disk from the driver's slicing) and execute Step 3-bis.0 directly.
 
+If `resume_flag` is true, this is an explicit resume invocation: skip this fresh pre-flight and Steps 2 / 2-bis / 3 (the wave plan is already sliced and checkpointed on disk) and execute the **Resume and crash recovery** section directly (entry: explicit `--resume`).
+
 Record the pipeline start time: `t_start = $(date +%s)`.
+
+### 1a-0. Auto-detect resumable runs
+
+On a normal fresh run only (`is_phase_runner` false AND `resume_flag` false), run the auto-detect scan in **Resume and crash recovery** step R.1 before validating the plan: it looks for an incomplete run-state under `docs/plan-runner/` and, if it finds one, offers to resume it. If the user accepts, control transfers to the resume machinery and this fresh pre-flight does not continue. If the user declines (the incomplete run-state is marked `abandoned`) or none is found, continue with 1a below as a fresh run.
 
 ### 1a. Validate plan file
 
@@ -573,7 +580,7 @@ Reached when THIS invocation is a relay phase-runner -- `is_phase_runner` is tru
 
 1. Read `run_state_path`. It already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt).
 2. Read that phase's wave-plan slice from `<phase_dir>/wave-plan.json`.
-3. Execute Step 4 over this phase's wave range only. The full per-wave barrier, gates, verification, bug JSON, dashboard, commit, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
+3. Execute Step 4 over this phase's wave range only, **beginning at the phase's first incomplete wave** -- `max(phase first wave, this phase's run-state `last_completed_wave` + 1)`. On a freshly-dispatched (pending) phase `last_completed_wave` is null, so it starts at the phase's first wave; on a resumed phase whose runner was re-dispatched mid-phase it starts just past the last completed wave, re-running no completed wave. The full per-wave barrier, gates, verification, bug JSON, dashboard, commit, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
 4. When the phase's last wave finishes its Step 4f, do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
 
 Phase-summary return -- the ONLY thing the driver receives (never per-wave agent returns or transcripts); keep it within the ~1-2k-token return budget and point at the manifest for detail:
@@ -679,18 +686,127 @@ Resume with:
   Codex:        $plan-runner:run --resume <absolute run-state path>
 ```
 
+## Resume and crash recovery
+
+plan-runner checkpoints every phased run to `run-state.json` (written at slicing time in Step 2-bis, updated after every wave in Step 4f). Resume re-enters an interrupted run -- a planned `stop`-mode boundary, a guardrail-forced stop, or a machine crash -- from the last completed wave. Resume reads state ONLY from `run-state.json` plus the on-disk artifacts it points at (manifests, wave-plan slices, per-wave bug JSONs); it never infers progress from git history alone. Two entry points reach this machinery:
+
+- **Explicit `--resume [path]`** (`resume_flag` is true): a resume invocation carrying no plan path; Step 1 routes here instead of the fresh pre-flight.
+- **Pre-flight auto-detect** (Step 1a-0 on a normal fresh run): an incomplete run-state is found and the user accepts the resume offer (R.1).
+
+Unphased runs write no run-state and are therefore never resumable -- there is nothing to resume, and re-invoking the plan just starts a fresh run.
+
+### R.1. Locate the run-state (explicit path, bare scan, or auto-detect)
+
+Resolve `run_state_path`:
+
+- **Explicit path** (`resume_path` is set): use it directly as `run_state_path`.
+- **Bare `--resume`** (`resume_flag` true, `resume_path` unset) **or the Step 1a-0 auto-detect scan**: scan for resumable run-states:
+  1. Find every `run-state.json` under `docs/plan-runner/` (Glob `docs/plan-runner/**/run-state.json`).
+  2. Read each. Keep those that parse AND whose `overall_status` is `active` or `interrupted` AND that have at least one phase whose `status` is not `complete`. Skip every `complete` or `abandoned` run-state -- **abandoned run-states are never re-offered or resumed.**
+  3. If none qualify: for a **bare `--resume`**, print `No resumable run found under docs/plan-runner/.` and STOP (the user asked to resume; do not silently start fresh). For the **Step 1a-0 auto-detect**, return to Step 1a and continue the fresh run silently.
+  4. Otherwise pick the most recent by `updated_at` as the candidate (note in the offer if others also exist). For a **bare `--resume`**, set `run_state_path` to the candidate and continue to R.2. For the **Step 1a-0 auto-detect**, print the offer:
+
+```
+Found an incomplete plan-runner run you can resume:
+  <run_state_path>
+  plan:    <plan_path>
+  phases:  <complete_count>/<phase_count> complete; next: phase <next phase_id>, wave <next wave>
+  updated: <updated_at>
+
+[Y] resume this run
+[n] start a fresh run on <given plan path> (marks the incomplete run abandoned)
+
+(Y/n)
+```
+
+  On `Y` (or empty default): set `run_state_path` to the candidate and continue to R.2. The plan path given on the fresh invocation is ignored -- all state comes from the run-state. On `n`: **mark the candidate `abandoned`** -- set its `overall_status` to `abandoned`, rewrite `updated_at`, write it back -- so it is not re-offered on later runs, then return to Step 1a and continue the fresh run on the given plan.
+
+### R.2. Load and validate the run-state (corrupt or missing)
+
+Read `run_state_path`. If the file does not exist, does not parse as JSON, or is missing any required field (`plan_path`, `plan_content_hash`, `phases`, `overall_status`), print the failure and offer a fresh run -- **never infer state**:
+
+```
+Cannot resume: run-state is missing or unreadable.
+  <run_state_path>
+  reason: <file not found | JSON parse error: ...  | missing field: ...>
+
+Start a fresh run instead with:
+  Claude Code:  /plan-runner:run <path-to-plan.md>
+  Codex:        $plan-runner:run <path-to-plan.md>
+```
+
+Then STOP. If `overall_status` is `complete`, print that the run already finished and STOP. If `overall_status` is `abandoned`, print that this run-state was abandoned and STOP -- abandoned run-states are never resumed.
+
+### R.3. Restore run variables (no dependency on Step 1)
+
+Derive every resumed variable from the run-state and its location, so nothing depends on Step 1's fresh-run computation:
+
+- `cycle_dir` = the parent directory of `run_state_path` (the run-state lives at the cycle root). Each phase's `directory` is recorded absolutely in the run-state; do NOT recompute cycle numbering or re-derive any path from Step 1 variables.
+- `backend`, `verify_mode`, `tdd_enabled`, and `phase_mode` = the values recorded in the run-state. Set `phasing_active = true` (a run-state exists only for a phased run) and `phase_count` = the number of entries in `phases`.
+- Re-detect host facilities that are not persisted: `git_available` per Step 1b-bis and `context7_available` per Step 1d. Re-resolve `max_waves_per_phase`, `auto_stop_phases`, and `relay_max_minutes` from `.plan-runner.yml` per Step 1d-quinquies (the phase list is already sliced, so these only feed the relay guardrail and the adaptive re-resolution in Step 3-bis.1).
+- If `tdd_enabled`, re-resolve the test command and green baseline by Step 1d-bis's detection path; do NOT re-prompt on resume. If detection cannot resolve a command non-interactively, proceed exactly as the relay phase-runner does (Step 3-bis.0) and let the missing gate surface through the normal loop.
+- Record `t_start = $(date +%s)` for this resumed session (the relay guardrail clock restarts per session, Step 3-bis.4).
+
+### R.4. Plan-drift guard
+
+Re-hash the plan file at `plan_path` (same tool and normalization as Step 2-bis) and compare it to the stored `plan_content_hash`. On a mismatch -- or if the plan file is now missing -- warn and **require explicit confirmation** before continuing against the already-sliced wave plan:
+
+```
+Plan file has changed since this run was checkpointed:
+  <plan_path>
+  checkpoint hash: <stored plan_content_hash>
+  current hash:    <current hash, or "file missing">
+
+Resuming runs the wave plan as sliced at checkpoint time; it does NOT re-analyze the
+edited plan. Continue against the checkpointed wave plan anyway? (y/N)
+```
+
+The default is No. On anything but an explicit `y`, STOP and suggest a fresh run to re-analyze the edited plan. Only when the hash matches (or the user explicitly confirms) proceed to R.5.
+
+### R.5. Compute the resume point
+
+- `resume_phase` = the first entry in `phases` whose `status` is not `complete`. If every phase is already `complete`, the run finished: set `overall_status` to `complete`, rewrite `updated_at`, and proceed to the terminal steps (Step 5 aggregation onward) on the terminal phase -- there is nothing left to execute.
+- Parse `resume_phase.wave_range` as `lo-hi`. Let `last = resume_phase.last_completed_wave`.
+- `resume_from_wave` = `lo` when `last` is null (the phase never started), otherwise `last + 1`. If `resume_from_wave > hi` (the interruption landed exactly on a phase boundary), the phase is effectively done: set `resume_phase.status` to `complete`, rewrite run-state, and repeat R.5 for the next incomplete phase.
+- `phase_dir` = `resume_phase.directory`.
+
+### R.6. Interrupted-wave re-dispatch (dirty tree, ask once)
+
+`resume_from_wave` is re-dispatched **from its start** -- any partial, uncommitted work left by the interruption is re-run, never assumed done. The interactive resuming session (the relay driver, or the single stop-mode session) makes the tree decision here, once, before phase execution begins.
+
+**Dirty-tree prompt (git only, ask once).** If `git_available` is true, run `git status --porcelain`. If its output is non-empty, ask before dispatching -- **never silently discard uncommitted work**:
+
+```
+Resuming into wave <resume_from_wave> (interrupted). The working tree has uncommitted changes:
+<git status --porcelain output>
+
+This wave re-runs from its start. Choose how to handle the current tree:
+  [s] stash first (git stash -u), then re-run the wave against a clean tree
+  [k] keep the changes and let this wave's agents overwrite files as needed
+
+(s/k)
+```
+
+On `s`, run `git stash -u`, then continue. On `k`, continue as-is. If the tree is clean, skip the prompt. **In no-git mode (`git_available` false), skip this prompt entirely** and re-run the wave over the working tree as-is: run-state.json alone drives resume, and every git-gated step (commit, PR, clean-tree check) stays skipped exactly as it is on a first run.
+
+**Rogue-commit baseline (git only).** The Step 4a rogue-commit guard runs on the re-dispatched wave against the wave's recorded start SHA: when Step 4 sets `wave_start_sha` for `resume_from_wave`, it uses the recorded `commit_sha` of the last completed wave (read from the phase manifests / run-state's `last_completed_wave`) rather than current `HEAD`, so any commit the interrupted wave made before crashing is detected as delivered work instead of being re-run blindly. When no prior wave committed, the baseline falls back to current `HEAD`.
+
+### R.7. Hand to phase execution
+
+Set `resume_phase.status` to `in_progress` and `overall_status` to `active` in the run-state, rewrite `updated_at`, and write it back. Then enter Step 3-bis at `resume_phase` with `resume_from_wave` in force (skip Step 3's wave-plan display -- it is already on disk). Step 3-bis re-resolves the effective mode (Step 3-bis.1) and runs the remaining phases from `resume_phase` forward: relay skips the already-`complete` phases and dispatches the first incomplete one (Step 3-bis.2); stop runs the first incomplete phase directly in this session (Step 3-bis.3). Step 4 begins the active phase at `resume_from_wave`, not the phase's first wave, so no completed wave re-runs. Cross-phase aggregation, the verifier-coverage gate, and every terminal step (Step 5, Step 7-bis, Step 8, the Run Report) still run only once, on the terminal phase, exactly as on a non-resumed phased run.
+
 ## Step 4: WAVE EXECUTION
 
 Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
 
-For each wave in the active phase's wave range (sequentially) -- for an unphased run that is all of `wave_plan.waves`; inside a phase (a relay phase-runner or a stop-mode session) it is only that phase's wave-plan slice, so Step 4 iterates the current phase's waves and no others:
+For each wave in the active phase's wave range (sequentially) -- for an unphased run that is all of `wave_plan.waves`; inside a phase (a relay phase-runner or a stop-mode session) it is only that phase's wave-plan slice, so Step 4 iterates the current phase's waves and no others. **On a resumed run, iteration begins at the phase's first incomplete wave** -- `max(phase first wave, (run-state `last_completed_wave` for this phase) + 1)`, which is `resume_from_wave` (Resume step R.5). A pending phase has `last_completed_wave` null, so it starts at the phase's first wave; a partially-completed phase starts just past its last completed wave. Waves before that point already completed (recorded in run-state / the phase manifest) and are NOT re-run:
 
 Print:
 ```
 [Phase 2/4] Wave <W>/<total_W>: dispatching <N> dev agents in parallel...
 ```
 
-Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
+Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. **Resume exception:** when this wave is the resume point (`resume_from_wave`, re-dispatched after a crash or stop -- Resume step R.6), set `wave_start_sha` to the recorded `commit_sha` of the last completed wave (from run-state's `last_completed_wave` / the phase manifest) instead of current `HEAD`, so the rogue-commit guard catches any commit the interrupted wave made before it was interrupted; fall back to current `HEAD` when no prior wave committed. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
 
 ### 4a. Dispatch dev agents (parallel)
 
