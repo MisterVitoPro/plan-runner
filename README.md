@@ -142,6 +142,13 @@ points you to `--no-tdd`.
   single-file runs (e.g. `pytest {file}`).
 - `--verify <mode>` -- verification coverage: `per-agent`, `per-wave` (default), or
   `last-wave-only`. Overrides `.plan-runner.yml`.
+- `--phase-size <N>` -- override `phasing.max_waves_per_phase` for this run. See
+  "Phasing large plans" below.
+- `--phase-mode <relay|stop>` -- override `phasing.mode` for this run.
+- `--no-phasing` -- disable phasing entirely and run the whole plan in one session,
+  regardless of plan size or `.plan-runner.yml` (the phasing kill switch).
+- `--resume [run-state path]` -- resume an interrupted phased run. See "Resuming a
+  run" below.
 
 ## Verification coverage
 
@@ -168,6 +175,99 @@ or per-run with `--verify <mode>` (which overrides the file). Precedence:
 A BLOCKED dev agent on a skipped wave still surfaces a P0. Any run that leaves
 waves unverified opens its PR as a **draft** with a warning banner, and the
 "no bugs found" summary says so -- reduced coverage never masquerades as a clean bill.
+
+## Phasing large plans
+
+Large plans (40+ tasks, ~10-15 waves) can run in one long-lived orchestrator
+session, and that session's host-process memory is never freed -- on
+constrained machines it can crash before the run finishes. Phasing splits an
+oversized wave plan into sequential phases so that memory can be reclaimed at
+phase boundaries.
+
+- **Threshold.** Phasing only activates once the sliced wave plan has more
+  waves than `max_waves_per_phase` (default `4`). At or under the threshold
+  the run proceeds exactly as before -- no phase directories, no run-state
+  file, nothing changes.
+- **Defaults**, configurable in `.plan-runner.yml`:
+
+```yaml
+phasing:
+  enabled: true            # default true
+  max_waves_per_phase: 4   # default 4
+  mode: auto                # auto (default) | relay | stop
+  auto_stop_phases: 3      # auto mode: relay up to this many phases, stop above
+  relay_max_minutes: 90    # relay guardrail: force stop at the next boundary past this
+```
+
+  Precedence for each setting is flag > `.plan-runner.yml` > default, the same
+  pattern as `--verify`.
+- **Relay vs. stop -- the honest memory trade-off.** In `relay` mode, a driver
+  session stays alive across phase boundaries and dispatches each phase as its
+  own subagent; the driver only ever keeps that phase's compact summary, never
+  the underlying wave-by-wave agent transcripts, so the driver's *context*
+  stays lean. But the driver's host process itself is never restarted, so its
+  memory footprint can still grow over a long run. `stop` mode is the
+  complete fix: each phase runs to completion in its own session, that
+  session then ends, and a freshly started process picks up the next phase
+  via `--resume` -- both context *and* host-process heap reset at every
+  boundary. **Only `stop` fully resets process memory; `relay` resets context
+  only.**
+- **Adaptive default.** With `mode: auto` (the default), plan-runner picks per
+  run: if the sliced phase count exceeds `auto_stop_phases` (default `3`) it
+  uses `stop`; otherwise it relays. On the Agent Teams backend, phasing always
+  uses `stop` regardless of configuration, since a teammate cannot spawn a
+  nested team to lead a relay.
+- **Relay guardrail.** Because relay never resets the host process, a long
+  relay run is bounded by wall time rather than by hoping a small return
+  payload is enough on its own: at every phase boundary, if elapsed time since
+  the run started exceeds `relay_max_minutes` (default `90`), plan-runner
+  forces a stop-and-resume at that boundary instead of continuing to relay.
+  Each relayed phase does return a small, bounded summary (roughly 1-2k
+  tokens) to the driver to keep its context lean -- that bound is a
+  context-size optimization, not the memory fix by itself; it's the wall-time
+  guardrail, not the small payload, that keeps a long relay run from creeping
+  toward the process-memory ceiling.
+- **Kill switch.** `--no-phasing` disables phasing entirely and runs the whole
+  plan in one session regardless of size or config, restoring the
+  pre-phasing behavior.
+
+## Resuming a run
+
+plan-runner checkpoints every phased run to a `run-state.json` at the cycle
+root, updated after every wave. That checkpoint makes it possible to pick a
+phased run back up after a planned `stop`-mode boundary, a guardrail-forced
+stop, or a crash.
+
+- **`--resume [run-state path]`.** With a path, resumes that specific
+  `run-state.json`. Bare (no path), plan-runner scans
+  `docs/plan-runner/**/run-state.json` for the most recently updated
+  resumable run (one that isn't already complete or abandoned) and resumes
+  it. A resume invocation carries no plan path -- all state, including which
+  plan was run, comes from the run-state file:
+
+  ```bash
+  # Claude Code
+  /plan-runner:run --resume
+
+  # Codex
+  $plan-runner:run --resume
+  ```
+
+- **Auto-detect.** On a normal fresh invocation, if an incomplete run-state is
+  found under `docs/plan-runner/`, plan-runner offers to resume it before
+  starting the new run; declining marks that run-state abandoned so it isn't
+  offered again.
+- **Crash recovery.** Resume re-enters at the last completed wave. It never
+  assumes partial or uncommitted work from an interrupted wave is done, and
+  re-runs that wave from its start. If git is available and the working tree
+  is dirty, it asks once whether to stash first or let the wave's agents
+  overwrite files as needed. If the plan file has changed since the run was
+  checkpointed (by content hash), it warns and requires explicit confirmation
+  before continuing -- resuming replays the checkpointed wave plan, it does
+  not re-analyze the edited plan.
+- Unphased runs (below the phasing threshold, or run with `--no-phasing`)
+  write no run-state and are never resumable -- there is nothing to
+  checkpoint, so re-invoking just starts a fresh run.
 
 ## Code Atlas sync
 

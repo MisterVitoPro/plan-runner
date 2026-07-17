@@ -495,3 +495,163 @@ test("pr skill drafts + banners when waves were left unverified", () => {
   assert.match(f, /draft[\s\S]{0,160}waves_skipped|waves_skipped[\s\S]{0,160}draft/i, "skipped waves force a draft PR");
   assert.match(f, /not semantically verified|not verified/i, "PR body banners the unverified waves");
 });
+
+test("phasing config: .plan-runner.yml block keys and defaults are pinned", () => {
+  const f = read("skills/run/SKILL.md");
+  // CLI flags
+  assert.match(f, /--phase-size <N>/, "documents --phase-size flag");
+  assert.match(f, /--phase-mode <relay\|stop>/, "documents --phase-mode flag");
+  assert.match(f, /--no-phasing/, "documents the --no-phasing kill-switch flag");
+  // yml block and its five keys with their documented defaults
+  assert.match(f, /phasing:\s*\n\s*enabled:\s*true\s*# default true/, "yml block: enabled default true");
+  assert.match(f, /max_waves_per_phase:\s*4\s*# default 4/, "yml block: max_waves_per_phase default 4");
+  assert.match(f, /mode:\s*auto\s*# auto \(default\) \| relay \| stop/, "yml block: mode default auto, enum relay|stop");
+  assert.match(f, /auto_stop_phases:\s*3\s*#/, "yml block: auto_stop_phases default 3");
+  assert.match(f, /relay_max_minutes:\s*90\s*#/, "yml block: relay_max_minutes default 90");
+  // precedence
+  assert.match(f, /flag > yml > default/, "documents flag > yml > default precedence");
+});
+
+test("phasing trigger: sub-threshold plans stay unphased with no run-state", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(
+    f,
+    /phasing_enabled`? is (true AND|false).{0,80}W <= max_waves_per_phase|W <= max_waves_per_phase[\s\S]{0,200}phasing does not activate/i,
+    "sub-threshold plans (W <= max_waves_per_phase) do not activate phasing"
+  );
+  assert.match(f, /byte-for-byte today's pipeline/i, "sub-threshold and --no-phasing runs stay byte-for-byte today's pipeline");
+});
+
+test("adaptive mode selection: stop above auto_stop_phases, relay at or below", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /phase_count > auto_stop_phases[\s\S]{0,40}effective_mode = "stop"/, "stop when phase_count exceeds auto_stop_phases");
+  assert.match(f, /phase_count <= auto_stop_phases[\s\S]{0,40}effective_mode = "relay"/, "relay when phase_count is at most auto_stop_phases");
+  assert.match(f, /Adaptive mode: <phase_count> phases <= auto_stop_phases[\s\S]{0,60}relaying/, "prints the relay adaptive-mode explanation");
+  assert.match(f, /Adaptive mode: <phase_count> phases > auto_stop_phases[\s\S]{0,60}stopping at each boundary/, "prints the stop adaptive-mode explanation");
+});
+
+test("teams-backend override forces stop mode at every phase boundary", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /Teams-backend override \(wins over everything/i, "names the teams-backend override and its precedence");
+  assert.match(f, /backend == "teams"[\s\S]{0,40}effective_mode = "stop"/, "teams backend sets effective_mode to stop");
+  assert.match(f, /regardless of `?phase_mode`?/i, "override applies regardless of the configured mode");
+  assert.match(
+    f,
+    /Agent Teams backend: forcing stop mode at every phase boundary \(a phase-runner cannot lead a nested team\)\./,
+    "prints the teams-override explanation line"
+  );
+});
+
+test("relay wall-time guardrail forces a stop-and-resume past relay_max_minutes", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 3-bis\.4\. Relay wall-time guardrail/, "defines the relay wall-time guardrail step");
+  assert.match(f, /exceeds `?relay_max_minutes`?[\s\S]{0,80}force a \*\*stop-and-resume\*\*/i, "guardrail forces a stop-and-resume past the threshold");
+  assert.match(
+    f,
+    /Relay guardrail: <elapsed>m elapsed since run start exceeds relay_max_minutes \(<relay_max_minutes>m\)\./,
+    "prints the guardrail trip line"
+  );
+  assert.match(f, /Forcing a stop at the phase <P>\/<phase_count> boundary for a full process reset\./, "prints the forced-stop line");
+});
+
+test("stop-boundary resume invocation is printed in both client forms", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /\/plan-runner:run --resume <absolute run-state path>/, "Claude Code resume form");
+  assert.match(f, /\$plan-runner:run --resume <absolute run-state path>/, "Codex resume form");
+  assert.match(f, /Stopping here for a full process reset before phase <P\+1>\./, "stop-boundary message names the full process reset");
+});
+
+test("resume: pre-flight auto-detect offers resume and marks declined runs abandoned", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 1a-0\. Auto-detect resumable runs/, "defines the pre-flight auto-detect step");
+  assert.match(f, /\[Y\] resume this run/, "offer prompt: resume option");
+  assert.match(f, /\[n\] start a fresh run on <given plan path> \(marks the incomplete run abandoned\)/, "offer prompt: decline marks abandoned");
+  assert.match(f, /set its `?overall_status`? to `?abandoned`?/i, "declining sets overall_status to abandoned");
+  assert.match(f, /abandoned run-states are never re-offered or resumed/i, "abandoned run-states are excluded from the resumable scan");
+  assert.match(f, /abandoned run-states are never resumed/i, "an explicit --resume onto an abandoned state still refuses");
+});
+
+test("resume: dirty-tree prompt offers stash or keep before re-dispatching a wave", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### R\.6\. Interrupted-wave re-dispatch \(dirty tree, ask once\)/, "defines the interrupted-wave re-dispatch step");
+  assert.match(f, /Dirty-tree prompt \(git only, ask once\)/, "names the dirty-tree prompt");
+  assert.match(f, /\[s\] stash first \(git stash -u\), then re-run the wave against a clean tree/, "stash option");
+  assert.match(f, /\[k\] keep the changes and let this wave's agents overwrite files as needed/, "keep option");
+  assert.match(f, /never silently discard uncommitted work/i, "the prompt exists precisely to avoid silent data loss");
+  assert.match(
+    f,
+    /In no-git mode \(`?git_available`? false\), skip this prompt entirely/i,
+    "no-git mode skips the prompt and still drives resume from run-state.json alone"
+  );
+});
+
+test("resume: plan-drift guard requires explicit confirmation on a hash mismatch", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### R\.4\. Plan-drift guard/, "defines the plan-drift guard step");
+  assert.match(f, /warn and \*\*require explicit confirmation\*\* before continuing/, "mismatch requires explicit confirmation");
+  assert.match(f, /The default is No\./, "confirmation defaults to No");
+});
+
+test("resume: corrupt or missing run-state reports failure and offers a fresh run, never inferred", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### R\.2\. Load and validate the run-state \(corrupt or missing\)/, "defines the corrupt/missing run-state step");
+  assert.match(f, /Cannot resume: run-state is missing or unreadable\./, "prints the failure message");
+  assert.match(f, /never infer state/i, "never infers state from a corrupt or missing run-state");
+});
+
+test("cross-phase verifier-coverage gate stays upstream of the PR step across all phases", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 5\.0\. Verifier-coverage gate \(runs before counting, on every path\)/, "defines the coverage gate step");
+  assert.match(f, /every.{0,10}wave `?1\.\.W`? of every phase produced a verdict/i, "gate sweeps every wave of every phase");
+  assert.match(f, /structurally impossible to reach the PR step/i, "gate makes an outstanding verdict block the PR step");
+  assert.match(f, /upstream of the PR step on every path across phases/i, "gate stays upstream across every phase path");
+});
+
+test("Return budget sections are pinned in all five agent roles", () => {
+  for (const a of [
+    "plan-analyzer",
+    "plan-dev",
+    "plan-test-author",
+    "plan-verifier",
+    "plan-aggregator",
+  ]) {
+    const f = read(`agents/${a}.md`);
+    assert.match(f, /## Return budget/, `${a} has a Return budget section`);
+    assert.match(f, /distilled structured summary, not a transcript/, `${a} describes the return as a distilled summary`);
+    assert.match(f, /roughly 1-2k tokens/, `${a} states the ~1-2k token budget`);
+    assert.match(f, /Point at file paths and line ranges/, `${a} instructs pointing at file:line instead of quoting bodies`);
+  }
+});
+
+test("run-state schema exists, parses, and documents the phase-checkpoint lifecycle", () => {
+  assert.ok(exists("schemas/run-state.schema.json"), "schemas/run-state.schema.json must exist");
+  const schema = JSON.parse(read("schemas/run-state.schema.json"));
+  for (const key of [
+    "plan_path",
+    "plan_content_hash",
+    "invocation_flags",
+    "backend",
+    "verify_mode",
+    "tdd_enabled",
+    "phases",
+    "overall_status",
+    "updated_at",
+  ]) {
+    assert.ok(schema.required.includes(key), `run-state schema requires ${key}`);
+  }
+  assert.deepEqual(
+    schema.properties.overall_status.enum,
+    ["active", "abandoned", "complete", "interrupted"],
+    "overall_status enum covers the resumability lifecycle"
+  );
+  assert.deepEqual(
+    schema.properties.phases.items.properties.status.enum,
+    ["pending", "in_progress", "complete"],
+    "per-phase status enum"
+  );
+  // valid + invalid fixtures exist and are wired into the schema validator
+  assert.ok(exists("schemas/examples/run-state.valid.json"), "valid run-state fixture must exist");
+  assert.ok(exists("schemas/examples/run-state.invalid.json"), "invalid run-state fixture must exist");
+  const validator = read("tests/validate_schemas.py");
+  assert.match(validator, /run-state\.schema\.json.{0,10}run-state\.valid\.json.{0,10}run-state\.invalid\.json/, "validate_schemas.py wires up the run-state case");
+});
