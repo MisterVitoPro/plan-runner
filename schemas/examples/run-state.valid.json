@@ -7,8 +7,8 @@
     "phasing_enabled": true,
     "no_phasing": false
   },
-  "backend": "native_subagent",
-  "verify_mode": "strict",
+  "backend": "subagent",
+  "verify_mode": "per-wave",
   "tdd_enabled": false,
   "phases": [
     {

@@ -42,13 +42,13 @@
     },
     "backend": {
       "type": "string",
-      "enum": ["native_subagent", "teams"],
-      "description": "The orchestrator backend: native_subagent (Claude Code default / Codex) or teams (Agent Teams)."
+      "enum": ["subagent", "teams"],
+      "description": "The orchestrator backend: subagent (Claude Code native subagent / Codex) or teams (Agent Teams)."
     },
     "verify_mode": {
       "type": "string",
-      "enum": ["strict", "lax"],
-      "description": "Verification mode: strict (fail on any bug) or lax (allow P2/P3)."
+      "enum": ["per-agent", "per-wave", "last-wave-only"],
+      "description": "Verification coverage mode: per-agent (one verifier per dev agent), per-wave (one verifier per wave), or last-wave-only (verifier only on the final wave)."
     },
     "tdd_enabled": {
       "type": "boolean",
@@ -91,8 +91,8 @@
     },
     "overall_status": {
       "type": "string",
-      "enum": ["active", "abandoned", "complete", "interrupted"],
-      "description": "Run-level status: active (in progress or resumable), abandoned (user declined auto-detect resume), complete (all phases done), or interrupted (crashed or stopped mid-phase)."
+      "enum": ["active", "abandoned", "complete"],
+      "description": "Run-level status: active (in progress or resumable), abandoned (user declined auto-detect resume), or complete (all phases done)."
     },
     "updated_at": {
       "type": "string",

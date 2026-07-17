@@ -18,6 +18,7 @@ CASES = [
     ("dev-return.schema.json", "dev-return-valid.json", "dev-return-invalid.json"),
     ("manifest.schema.json", "manifest-valid.json", "manifest-invalid.json"),
     ("run-state.schema.json", "run-state.valid.json", "run-state.invalid.json"),
+    ("bug-report.schema.json", "bug-report-valid.json", "bug-report-invalid.json"),
 ]
 
 
