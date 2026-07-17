@@ -1,6 +1,6 @@
 {
   "name": "plan-runner",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "Execute a Markdown implementation plan as file-disjoint parallel waves with test-first gates, independent verification, bug-driven re-planning, and an optional pull request.",
   "author": {
     "name": "MisterVitoPro",

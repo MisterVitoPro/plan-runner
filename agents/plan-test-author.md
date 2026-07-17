@@ -46,6 +46,10 @@ You MUST return a single JSON object matching `dev-return.schema.json`. No prose
 
 Include a `token_usage` field in your return JSON so the orchestrator can tally this run's token cost even when the harness hides your usage from it. If the harness surfaced your own token usage to you in-band during this session (e.g. a system warning or budget line of the form `Token usage: <used>/<max>`), report the MOST RECENT figure you saw: `{"input": <n|null>, "output": <n|null>, "total": <n>}` -- use the input/output split only if the harness showed one; otherwise put the combined figure in `total` and leave `input`/`output` null. If no such figure ever appeared, set `"token_usage": null`. NEVER estimate, extrapolate, or infer a token count from message or file sizes -- null is the honest answer when the harness showed you nothing.
 
+## Return budget
+
+Your return JSON is a distilled structured summary, not a transcript -- keep it within roughly 1-2k tokens. Point at file paths and line ranges (e.g. `src/foo.ts:42-58`) instead of quoting file bodies, logs, or diffs in full. Keep `summary` to its specified two sentences, keep each `concerns` entry to one or two sentences citing a file and line, and list `test_ids` as bare names -- not the test bodies.
+
 ## Process
 
 1. **Read the task.** Parse `task_excerpt_lines` as `START-END`. Read `plan_path` with `offset: START` and `limit: END - START + 1`. Read it alongside `acceptance_criteria` -- together they are the behavior to pin down. Do NOT read the rest of the plan.

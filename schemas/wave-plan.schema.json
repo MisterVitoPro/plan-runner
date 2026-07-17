@@ -16,7 +16,7 @@
         "required": ["wave_id", "agents"],
         "properties": {
           "wave_id": {"type": "integer", "minimum": 1},
-          "rationale": {"type": "string", "description": "Verbose mode only. Why these tasks belong together in this wave."},
+          "rationale": {"type": "string", "maxLength": 2000, "description": "Verbose mode only. Why these tasks belong together in this wave. Pre-1.13.0 artifacts uncapped."},
           "agents": {
             "type": "array",
             "minItems": 1,
@@ -31,7 +31,7 @@
                 "owned_files": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                 "acceptance_criteria": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                 "recommended_model": {"type": "string", "enum": ["haiku", "sonnet", "opus"]},
-                "complexity_signals": {"type": "array", "items": {"type": "string"}, "description": "Verbose mode only. Observations about inference confidence (e.g., 'file path inferred')."},
+                "complexity_signals": {"type": "array", "items": {"type": "string", "maxLength": 500}, "description": "Verbose mode only. Observations about inference confidence (e.g., 'file path inferred'). Pre-1.13.0 artifacts uncapped."},
                 "role": {"type": "string", "enum": ["test-author", "impl", "standalone"], "description": "TDD role. Omitted on classic (non-TDD) runs."},
                 "testable": {"type": "boolean", "description": "TDD mode only. True for test-author/impl agents, false for non-testable standalone tasks."},
                 "non_testable_reason": {"type": "string", "description": "TDD mode only. One-line reason a standalone task was classified non-testable."},

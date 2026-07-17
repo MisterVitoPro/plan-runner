@@ -20,13 +20,19 @@ Follow this pipeline exactly. Do not skip steps.
 
 ## Argument parsing
 
-Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path. Flags:
+**Internal phase-runner form (relay only).** If the invocation input begins with `--phase-runner <run-state path> --phase <P>`, this is not a normal run: a relay driver dispatched you (Step 3-bis.2) to execute one phase in a fresh context. Capture `run_state_path = <run-state path>` and `phase_runner_id = <P>`, set `is_phase_runner = true`, and do NOT tokenize for a plan path or parse any other flag -- skip pre-flight, analysis, and slicing (all state is already on disk) and jump straight to Step 3-bis.0, which loads everything else from the run-state. For every other invocation set `is_phase_runner = false` and continue below.
+
+Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path (except for a `--resume` invocation, which carries no plan path -- state comes from the run-state; see the `--resume` flag below). Flags:
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
 - `--verify <mode>` -- optional verification coverage mode: one of `per-agent`, `per-wave`, `last-wave-only`. Overrides `.plan-runner.yml`. When absent, the config file (or the `per-wave` default) decides. Capture its value as `verify_mode_flag` (unset if the flag is absent).
+- `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
+- `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
+- `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
+- `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under `docs/plan-runner/`. A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Strip all flags (including `--verify <mode>`) before using the plan path.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
 
 ## Timing
 
@@ -61,7 +67,7 @@ Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), ever
 
 ### End-of-run Run Report
 
-The terminal end of a cycle prints one **Run Report** -- a single ASCII block (fixed 60-column width, no Unicode box-drawing, no color) that presents the whole cycle at a glance and then in detail. It is rendered from the finalized `token_usage` tally (above) and the phase-timing tally. It prints once, as the last output before STOP, on every terminal path: the clean run, the bugs-found run after the user declines the re-run, and the git-absent path. It does NOT print on the bugs-found re-run *handoff* path (user picks `Y`) -- that intermediate cycle prints only the compact decision block (Step 6) and hands off; its full tally still lands in `manifest.json`.
+The terminal end of a cycle prints one **Run Report** -- a single ASCII block (fixed 60-column width, no Unicode box-drawing, no color) that presents the whole cycle at a glance and then in detail. It is rendered from the finalized `token_usage` tally (above) and the phase-timing tally. On a phased run the tally and timing come from the **cross-phase roll-up** (Step 5.2 -- the sum across every phase's `manifest.json`, non-null token values only, coverage counters aggregated), so the single Run Report still reflects the entire multi-phase cycle rather than just the terminal phase. It prints once, as the last output before STOP, on every terminal path: the clean run, the bugs-found run after the user declines the re-run, and the git-absent path. It does NOT print on the bugs-found re-run *handoff* path (user picks `Y`) -- that intermediate cycle prints only the compact decision block (Step 6) and hands off; its full tally still lands in `manifest.json`.
 
 Clean run:
 
@@ -119,9 +125,31 @@ Rendering rules:
 - **Timing by phase** table lists each phase's elapsed time as `Xm Ys`: Pre-flight, Analyze plan, Wave execution (annotated `(<W> waves)`), Aggregation (omit the row on a zero-bug run, where no aggregator ran), Sync code atlas (mark skipped when git is absent or code-atlas is not present), Open PR (mark skipped when git is absent), and a `Total`. `User confirm` is excluded from the total.
 - **Artifacts** always lists `Manifest`; it adds `Bug report` and `Fix plan` rows only when `total_bugs > 0`.
 
+### Intermediate phase summary (phased runs)
+
+At every **non-terminal** phase boundary a phased run prints a compact phase summary -- **never the full Run Report**, which is a terminal-only, once-per-run artifact. The relay driver prints it after each phase-runner returns (Step 3-bis.2); a stop-mode session prints it before ending at the boundary (Step 3-bis.3); the wall-time guardrail reuses the stop form (Step 3-bis.4). It is a small fixed block covering the phase just finished -- waves run, bugs so far, tokens with coverage, and the next action -- and nothing more:
+
+```
+Phase <P>/<phase_count> complete -- waves <lo>-<hi> (<n> waves)
+  Bugs so far    <cumulative bug count, phases 1..P>
+  Tokens so far  <sum of non-null totals, phases 1..P> (<agents_reported>/<agents_total> agents)
+  Next           <phase <P+1>: relay dispatch | stop + resume | resume command>
+```
+
+- **Bugs so far** and **Tokens so far** are cumulative across phases `1..P`, read from the phase manifests already on disk (`phase-1..P/manifest.json`), so the operator sees the run's running total while the driver holds no wave-level context. Tokens sum **non-null values only**; when coverage across those phases is partial (`agents_reported < agents_total`), append ` -- lower bound` to the Tokens line, mirroring the Run Report's honesty rule. Never fabricate a token count for an agent that stayed `null` in its phase manifest.
+- **Next** names what follows this boundary: relaying into phase `<P+1>`, or stopping with the copy-pasteable resume invocation (stop mode, guardrail, or teams backend). This block is compact by contract -- it MUST NOT expand into the token/timing tables, the status header, or the artifacts list of the full Run Report. The full Run Report prints exactly once, only on the terminal phase.
+
 ## Step 1: PRE-FLIGHT
 
+If `is_phase_runner` is true, this invocation is a relay phase-runner: skip Steps 1, 2, 2-bis, and 3 entirely (all state is already on disk from the driver's slicing) and execute Step 3-bis.0 directly.
+
+If `resume_flag` is true, this is an explicit resume invocation: skip this fresh pre-flight and Steps 2 / 2-bis / 3 (the wave plan is already sliced and checkpointed on disk) and execute the **Resume and crash recovery** section directly (entry: explicit `--resume`).
+
 Record the pipeline start time: `t_start = $(date +%s)`.
+
+### 1a-0. Auto-detect resumable runs
+
+On a normal fresh run only (`is_phase_runner` false AND `resume_flag` false), run the auto-detect scan in **Resume and crash recovery** step R.1 before validating the plan: it looks for an incomplete run-state under `docs/plan-runner/` and, if it finds one, offers to resume it. If the user accepts, control transfers to the resume machinery and this fresh pre-flight does not continue. If the user declines (the incomplete run-state is marked `abandoned`) or none is found, continue with 1a below as a fresh run.
 
 ### 1a. Validate plan file
 
@@ -300,6 +328,39 @@ Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4b / Step 5
 - `per-agent`: one verifier per dev agent, every wave (highest scrutiny/cost).
 - `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4c) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
 
+### 1d-quinquies. Resolve phasing config
+
+Large plans (40+ tasks, ~10-15 waves) run today in one long-lived orchestrator session whose host-process memory is never freed, which crashes constrained machines. Phasing splits an oversized wave plan into sequential phases, each executed with a fresh context. Resolve the phasing configuration now; the actual slicing happens in Step 2-bis once the wave count is known.
+
+`.plan-runner.yml` MAY carry a `phasing` block:
+
+```yaml
+phasing:
+  enabled: true            # default true
+  max_waves_per_phase: 4   # default 4
+  mode: auto               # auto (default) | relay | stop
+  auto_stop_phases: 3      # auto mode: relay up to this many phases, stop above
+  relay_max_minutes: 90    # relay guardrail: force stop at the next boundary past this
+```
+
+Resolve each setting in precedence order **flag > yml > default** (the same precedence pattern as `--verify`). Extract each key directly with the Read tool -- do NOT depend on a YAML parser being installed, exactly as Step 1d-quater extracts `verification.mode`. A missing file, a missing key, or an unreadable file falls through to the default.
+
+- `phasing_enabled`: `false` if `no_phasing_flag` is true (the kill-switch wins over everything); otherwise the yml `phasing.enabled` value; otherwise `true`.
+- `max_waves_per_phase`: `phase_size_flag` if set; otherwise the yml `phasing.max_waves_per_phase` value; otherwise `4`. Must be an integer >= 1; if the resolved value is not a positive integer, print an error and STOP.
+- `phase_mode`: `phase_mode_flag` if set; otherwise the yml `phasing.mode` value; otherwise `auto`. Validate against {`relay`, `stop`, `auto`}; if it is anything else, print an error and STOP. (`auto` resolves to `relay` or `stop` per phase count during execution -- Step 3-bis's adaptive resolution; slicing itself is mode-independent.)
+- `auto_stop_phases`: the yml `phasing.auto_stop_phases` value; otherwise `3`.
+- `relay_max_minutes`: the yml `phasing.relay_max_minutes` value; otherwise `90`.
+
+Print the resolved config and its trigger threshold:
+
+    Phasing: <enabled|disabled>. Threshold: >4 waves (max_waves_per_phase=<max_waves_per_phase>), mode=<phase_mode>.
+
+When `phasing_enabled` is false, print instead:
+
+    Phasing disabled (--no-phasing or phasing.enabled: false) -- running the whole plan in one session.
+
+Store `phasing_enabled`, `max_waves_per_phase`, `phase_mode`, `auto_stop_phases`, and `relay_max_minutes` for Step 2-bis (slicing) and for the run-state checkpoint.
+
 ### 1e. Initialize manifest
 
 Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
@@ -394,6 +455,99 @@ Capture the analyzer's token usage (see **Token accounting**) and append it to `
 
 Record `t_analyze_done = $(date +%s)`.
 
+## Step 2-bis: SLICE INTO PHASES
+
+Slicing is mechanical arithmetic on the already-validated wave plan. The analyzer is NOT re-dispatched and `agents/plan-analyzer.md` is untouched -- wave order is topological, so any split into consecutive-wave ranges is dependency-safe by construction.
+
+Let `W` = the number of waves in `wave_plan.waves`.
+
+**Unphased path (byte-for-byte today's pipeline).** If `phasing_enabled` is false (including whenever `--no-phasing` was passed), OR `W <= max_waves_per_phase`, then phasing does not activate:
+
+- Set `phasing_active = false` and `phase_dir = $cycle_dir`.
+- Do NOT create any `phase-*/` directory. Do NOT write `run-state.json`.
+- The run proceeds exactly as it does today: one session, the flat `cycle-<N>/` layout, Step 4 iterating all `W` waves, Step 5 aggregating `$cycle_dir/bugs/`. Nothing below in this step runs.
+- Print: `Plan fits in one phase (<W> waves <= <max_waves_per_phase>) -- running unphased.` (omit this line entirely when `phasing_enabled` is false, since Step 1d-quinquies already announced that phasing is off).
+
+Then proceed to Step 3.
+
+**Phased path.** Otherwise (`phasing_enabled` is true AND `W > max_waves_per_phase`), set `phasing_active = true` and slice:
+
+1. `phase_count = ceil(W / max_waves_per_phase)`.
+2. Phase `P` (1-indexed, `1..phase_count`) owns the consecutive global waves `((P-1) * max_waves_per_phase) + 1` through `min(P * max_waves_per_phase, W)`. **Global wave numbering is preserved across phases** -- wave `<W>` keeps its number, so its bug JSON stays `wave-<W>.json` and manifests/run-state reference the global number. The last phase may be short.
+3. For each phase `P`, create its directory and per-phase `bugs/`:
+
+```bash
+mkdir -p "$cycle_dir/phase-$P/bugs"
+```
+
+   write that phase's wave-plan slice -- the sub-array of `wave_plan.waves` for its wave range, in the same shape as the canonical wave plan -- to `$cycle_dir/phase-$P/wave-plan.json`, and write a starter `$cycle_dir/phase-$P/manifest.json` using the **same template as Step 1e** (identical fields and starter values) plus one additive object `"phase": {"phase_id": <P>, "of": <phase_count>, "wave_range": "<this phase's global range>"}`. The `phase` object is additive and optional, so a phase manifest still satisfies the manifest schema's back-compat rule. During a phase's execution, Step 4 appends its wave entries to this per-phase manifest (that is what `phase_dir` resolves to); the cycle-root `manifest.json` written in Step 1e stays as the pre-slice starter, and terminal-phase reporting (Step 5.2) sums across the per-phase manifests.
+
+### Phase directory layout (phased runs only)
+
+```
+cycle-<N>/
+  wave-plan.json        # canonical full wave plan (Step 2, unchanged)
+  run-state.json        # the checkpoint (this step)
+  phase-1/
+    wave-plan.json      # this phase's wave slice
+    bugs/               # this phase's per-wave bug JSONs
+    manifest.json       # this phase's cycle-manifest (initialized at phase start)
+  phase-2/ ...
+  bugs.md               # terminal-phase aggregation output (cycle root)
+  fix-plan.md           # terminal-phase aggregation output (cycle root)
+```
+
+The canonical `wave-plan.json` stays at the cycle root. Each phase owns its slice, `bugs/`, and `manifest.json`. `phase_dir` names the active phase's directory (`$cycle_dir/phase-<P>/`) during that phase's execution; every per-wave write in Step 4 that targets `$cycle_dir/bugs/` or `$cycle_dir/manifest.json` resolves against `phase_dir` instead. For an unphased run `phase_dir` is `$cycle_dir`, so those same Step 4 paths are byte-for-byte unchanged.
+
+### Write the run-state checkpoint
+
+Before dispatching any dev agent, write `run-state.json` to the **cycle** directory (`$cycle_dir/run-state.json`) -- per-cycle, so a fix-plan re-run (a new cycle) phases and checkpoints independently. It conforms to `../../schemas/run-state.schema.json` and records:
+
+```json
+{
+  "plan_path": "<absolute path to the source plan>",
+  "plan_content_hash": "<SHA256 of the plan file contents>",
+  "invocation_flags": {
+    "phase_size": <phase_size_flag or null>,
+    "phase_mode": "<phase_mode>",
+    "phasing_enabled": <phasing_enabled>,
+    "no_phasing": <no_phasing_flag>
+  },
+  "backend": "<backend>",
+  "verify_mode": "<verify_mode>",
+  "tdd_enabled": <tdd_enabled>,
+  "phases": [
+    {"phase_id": 1, "wave_range": "1-<max_waves_per_phase>", "status": "pending", "directory": "<absolute path to cycle-<N>/phase-1>", "last_completed_wave": null}
+  ],
+  "overall_status": "active",
+  "updated_at": "<ISO 8601 from `date -Iseconds`>"
+}
+```
+
+Compute `plan_content_hash` with an available hashing tool (`sha256sum "<plan path>"`, `shasum -a 256 "<plan path>"`, or `certutil -hashfile "<plan path>" SHA256` on Windows), then normalize to the bare 64-character digest, lowercased with all whitespace stripped, so it matches the schema's `^[a-f0-9]{64}$` pattern (`certutil` emits uppercase with spaces). It guards resume against plan drift (Step 6 / resume compares it). List one `phases` entry per sliced phase, all `status: "pending"`, `last_completed_wave: null`; use each phase's absolute directory path and its global `wave_range` (e.g. `"1-4"`, `"5-8"`).
+
+### Run-state lifecycle
+
+`run-state.json` is the durable source of truth for stop/resume and crash recovery -- it is written and updated even in no-git mode (git-gated steps are skipped, but the checkpoint is not). Update it at exactly three points, always rewriting `updated_at`:
+
+1. **At slicing time (here):** the initial write above -- all phases `pending`, `overall_status: "active"`.
+2. **After every wave completion (Step 4f):** set the active phase's `last_completed_wave` to the just-finished global wave number and its `status` to `in_progress`.
+3. **At every phase boundary:** when a phase's last wave completes, set that phase's `status` to `complete`; set the next phase's `status` to `in_progress` (or, when the terminal phase finishes, set `overall_status` to `complete` during terminal roll-up, Step 5.2).
+
+Print the phase plan:
+
+```
+Phasing active: <W> waves sliced into <phase_count> phases of <=<max_waves_per_phase> waves.
+  Phase 1: waves 1-<n>
+  Phase 2: waves <n+1>-<m>
+  ...
+Checkpoint: <cycle_dir>/run-state.json
+```
+
+Then proceed to Step 3.
+
+> Mode execution (relay driver vs. stop boundaries vs. adaptive resolution and the wall-time guardrail) is Step 3-bis. This step only slices, lays out the directories, and writes the checkpoint.
+
 ## Step 3: DISPLAY WAVE PLAN
 
 Print the wave plan in human-readable form:
@@ -424,20 +578,251 @@ Proceed automatically without waiting for user input.
 
 Record `t_confirmed = $(date +%s)`.
 
-(Continued in Step 4: WAVE EXECUTION)
+(Continued in Step 3-bis: PHASE EXECUTION, then Step 4: WAVE EXECUTION)
+
+## Step 3-bis: PHASE EXECUTION (driver, modes, and boundaries)
+
+This step is the phase driver. It runs after the wave plan is displayed (Step 3) and decides how the sliced phases execute: it resolves `phase_mode` to an effective mode and hosts the relay loop, the stop boundaries, and the wall-time guardrail. Per-wave behavior never changes here -- every phase runs the existing Step 4 wave loop unchanged (barrier, gates, verification per `verify_mode`, teardown, commit, manifest); this step only orchestrates *which session* runs *which phase* and *what happens at each phase boundary*.
+
+**Unphased passthrough.** If `phasing_active` is false (Step 2-bis left the run unphased -- every `--no-phasing` run and every sub-threshold run), this step is a no-op: proceed directly to Step 4 and run all `W` waves in this one session exactly as today. Nothing below applies, so the sub-threshold and `--no-phasing` paths stay byte-for-byte today's pipeline.
+
+Otherwise `phasing_active` is true -- continue.
+
+### 3-bis.0. Phase-runner entry (relay subagents only)
+
+Reached when THIS invocation is a relay phase-runner -- `is_phase_runner` is true because a driver dispatched you with the internal input `--phase-runner <run-state path> --phase <P>` (Step 3-bis.2). You are NOT the driver: do not slice, do not resolve modes, do not aggregate, do not run any terminal step.
+
+1. Read `run_state_path`. Derive `cycle_dir` = the **parent directory of `run_state_path`** (the run-state lives at the cycle root), so Step 4f's `$cycle_dir/run-state.json` rewrite has `cycle_dir` defined even though this relay phase-runner skipped Steps 1/2 where a fresh run computes it. The run-state already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt).
+2. Read that phase's wave-plan slice from `<phase_dir>/wave-plan.json`.
+3. Execute Step 4 over this phase's wave range only, **beginning at the phase's first incomplete wave** -- `max(phase first wave, this phase's run-state `last_completed_wave` + 1)`. On a freshly-dispatched (pending) phase `last_completed_wave` is null, so it starts at the phase's first wave; on a resumed phase whose runner was re-dispatched mid-phase it starts just past the last completed wave, re-running no completed wave. The full per-wave barrier, gates, verification, bug JSON, dashboard, commit, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
+4. When the phase's last wave finishes its Step 4f, **finalize and persist this phase's own scoped token tally before returning.** Compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this phase-runner session's in-memory `token_usage.by_agent` (the dev agents and verifiers this phase dispatched) using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object -- its `by_agent` array plus the four rolled-up fields -- to the top level of this phase's `$phase_dir/manifest.json`. This is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from **every** phase manifest, not just the terminal phase's. Then do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
+
+Phase-summary return -- the ONLY thing the driver receives (never per-wave agent returns or transcripts); keep it within the ~1-2k-token return budget and point at the manifest for detail:
+
+```json
+{
+  "phase_id": <P>,
+  "wave_range": "<global range, e.g. 5-8>",
+  "waves": [{"wave_id": <W>, "verifier_status": "<status>", "bug_count": <n>, "commit_sha": "<sha or null>"}],
+  "phase_bug_count": <sum of this phase's wave bug counts>,
+  "token_usage": {"total_tokens": <sum of non-null totals>, "agents_reported": <n>, "agents_total": <n>, "complete": <bool>},
+  "manifest_path": "<absolute path to this phase's manifest.json>",
+  "status": "complete | interrupted"
+}
+```
+
+`status` is `interrupted` only if a wave could not complete; run-state (written per wave in Step 4f) still records the last completed wave, so the driver applies the normal resume path. Never inline wave-level data -- point at `manifest_path`.
+
+### 3-bis.1. Resolve the effective execution mode
+
+`phase_mode` (from Step 1d-quinquies) is `relay`, `stop`, or `auto`. Resolve the mode that governs this run, in this precedence:
+
+1. **Teams-backend override (wins over everything, including an explicit `relay`).** If `backend == "teams"`, set `effective_mode = "stop"` regardless of `phase_mode`. A teammate cannot spawn a nested team, so a phase-runner subagent cannot lead one and relay is impossible on this backend (ADR-0003). Print the one-line explanation:
+
+   `Agent Teams backend: forcing stop mode at every phase boundary (a phase-runner cannot lead a nested team).`
+
+2. **Explicit mode.** Else if `phase_mode` is `relay` or `stop`, set `effective_mode = phase_mode` (a flag or the yml chose it explicitly).
+
+3. **Adaptive default.** Else (`phase_mode == "auto"` -- no explicit mode configured), resolve by the sliced `phase_count`:
+   - If `phase_count > auto_stop_phases`: `effective_mode = "stop"` -- the large plans that motivate phasing default to the full process reset.
+   - Else (`phase_count <= auto_stop_phases`): `effective_mode = "relay"`.
+
+   Print the one-line explanation, exactly one of:
+
+   `Adaptive mode: <phase_count> phases <= auto_stop_phases (<auto_stop_phases>) -- relaying (context reset per phase).`
+   `Adaptive mode: <phase_count> phases > auto_stop_phases (<auto_stop_phases>) -- stopping at each boundary (full process reset).`
+
+Store `effective_mode`. Branch: `relay` -> 3-bis.2; `stop` -> 3-bis.3.
+
+### 3-bis.2. Relay mode -- phase-driver loop
+
+The invoking session is a thin driver. In relay mode it NEVER runs wave execution itself; each phase runs in its own fresh-context phase-runner subagent, and the driver holds only run-state pointers plus one phase summary at a time. Driver-side nesting stays at a constant depth regardless of `phase_count` (driver -> phase runner -> dev agents), never a phase-to-phase chain -- a chain would nest one level per phase and hit the platform's depth cap on large runs (ADR-0003).
+
+Resolve this active `SKILL.md` to an absolute path once. Then, for each phase `P` in `1..phase_count` in order (skip any phase already `complete` in run-state):
+
+1. **Guardrail check at the boundary.** Before dispatching phase `P` when `P > 1` (i.e. at each phase boundary), apply the relay wall-time guardrail (3-bis.4). If it trips, force a stop boundary here and end the session -- do NOT dispatch the next phase.
+2. Dispatch a fresh-context general subagent -- the same self-contained handoff mechanism as the Step 6 fix-plan re-run -- with this prompt:
+
+```
+You are executing the Plan Runner run skill as a phase runner in a fresh session.
+
+Read the complete skill instructions at <absolute path to this run SKILL.md>.
+Treat them as the active instructions and execute them with this invocation input:
+  --phase-runner <absolute run-state path> --phase <P>
+
+Everything else -- the wave-plan slice, verify mode, backend, TDD state, phase
+directory -- is already on disk in the run-state and the phase directory. Read it fresh.
+Run only phase <P>'s waves (Step 3-bis.0), then return the single phase-summary JSON.
+Do not aggregate, do not open a PR, do not run any terminal step.
+```
+
+3. Wait for the phase-runner to return. Parse its phase-summary JSON. If it does not parse, or `status` is `interrupted`, treat the phase as interrupted: run-state already records the last completed wave, so offer resume in-session or stop with the resume invocation (the resume path). Do NOT drive later phases over an interrupted one.
+4. Record the phase summary (waves, bug count, token tally with coverage, `manifest_path`) for the terminal Run Report, which sums across the per-phase manifests (Step 5.2). The driver keeps ONLY this summary -- never the phase's per-wave agent returns or transcripts.
+5. Tear down the phase-runner subagent with the host-native stop facility once its summary is captured; it must not idle after returning.
+6. Print the compact intermediate phase summary (the **Intermediate phase summary** block in the Token accounting section -- waves run, bugs so far, tokens with coverage, next action; never the full Run Report) and continue to phase `P+1`.
+
+After the terminal phase's runner returns (and the guardrail has not tripped), proceed to Step 5 for cross-phase aggregation over every phase's `bugs/` directory. The driver never dispatched a dev agent or verifier itself, so it carries no wave-level context into aggregation.
+
+### 3-bis.3. Stop mode -- clean session boundaries
+
+Stop mode fully resets the host process at each boundary: each session runs exactly ONE phase directly in its own context, then ends the session, and a fresh OS process resumes the next phase. This is the complete memory fix -- relay resets context but not host-process heap; stop resets both -- and is what the teams backend and large runs use.
+
+In this session, execute the first phase whose run-state `status` is not `complete` (on the initial run that is phase 1; on a resumed session the resume path selects it):
+
+1. Run Step 4 over that phase's wave range only, directly in this session -- the full per-wave barrier, gates, verification, teardown, commit, and per-wave manifest + run-state updates, unchanged -- writing every artifact to that phase's `phase_dir`.
+2. When the phase's last wave completes, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 5.2); confirm it reflects the boundary before ending. **Finalize and persist this phase's own scoped token tally now**, at every stop boundary (terminal and non-terminal alike): compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this session's in-memory `token_usage.by_agent` using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object to the top level of this phase's `$phase_dir/manifest.json`. On phase 1 that in-memory `by_agent` also carries the analyzer entry (Step 2 ran in this same session), so it rides along into phase 1's manifest; a resumed intermediate phase carries only its own dev agents and verifiers. Persisting at every boundary is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from every phase manifest before the fresh process (or terminal aggregation) takes over.
+3. Then:
+   - **More phases remain:** print the compact phase summary (the **Intermediate phase summary** block, not the full Run Report) followed by a copy-pasteable resume invocation, and end the session cleanly (STOP). Do NOT run Step 5 or any terminal step -- the fresh resumed process runs the next phase.
+
+```
+Phase <P>/<phase_count> complete. Stopping here for a full process reset before phase <P+1>.
+Resume with:
+  Claude Code:  /plan-runner:run --resume <absolute run-state path>
+  Codex:        $plan-runner:run --resume <absolute run-state path>
+```
+
+   - **Terminal phase just completed:** do NOT stop. Proceed to Step 5 for cross-phase aggregation, then the terminal steps (Step 7-bis, Step 8, Run Report) run in this session exactly as on an unphased run. Step 5 reads every phase's bug JSONs from disk, so it needs no earlier-phase context.
+
+The `--resume` flag, pre-flight auto-detect, and crash recovery that re-enter at the selected phase are the resume machinery; a stop boundary here only ensures run-state is current and prints the invocation. The guardrail-forced stop (3-bis.4) reuses this exact boundary and invocation.
+
+### 3-bis.4. Relay wall-time guardrail
+
+Relay keeps the driver's context lean but does NOT reset the host process, so a long relay run can still creep toward the process-memory envelope. Bound it by wall-time, not by hoping payload caps suffice. While relaying (3-bis.2), at every phase boundary -- after phase `P` completes and before dispatching phase `P+1` -- compare elapsed wall-time since this session's run start (`t_start`, Step 1) against `relay_max_minutes`:
+
+- If `(now - t_start)` in minutes is `<= relay_max_minutes`: continue to the next phase's relay dispatch.
+- If it exceeds `relay_max_minutes`: force a **stop-and-resume** at this boundary. This is an early stop boundary that reuses the stop machinery (3-bis.3): run-state is already current (written per wave and at the boundary), so print the reason and the copy-pasteable resume invocation and end the session (STOP). The fresh resumed process continues from phase `P+1`; its mode re-resolves, and if it relays again its own `t_start` restarts the guardrail clock.
+
+```
+Relay guardrail: <elapsed>m elapsed since run start exceeds relay_max_minutes (<relay_max_minutes>m).
+Forcing a stop at the phase <P>/<phase_count> boundary for a full process reset.
+Resume with:
+  Claude Code:  /plan-runner:run --resume <absolute run-state path>
+  Codex:        $plan-runner:run --resume <absolute run-state path>
+```
+
+## Resume and crash recovery
+
+plan-runner checkpoints every phased run to `run-state.json` (written at slicing time in Step 2-bis, updated after every wave in Step 4f). Resume re-enters an interrupted run -- a planned `stop`-mode boundary, a guardrail-forced stop, or a machine crash -- from the last completed wave. Resume reads state ONLY from `run-state.json` plus the on-disk artifacts it points at (manifests, wave-plan slices, per-wave bug JSONs); it never infers progress from git history alone. Two entry points reach this machinery:
+
+- **Explicit `--resume [path]`** (`resume_flag` is true): a resume invocation carrying no plan path; Step 1 routes here instead of the fresh pre-flight.
+- **Pre-flight auto-detect** (Step 1a-0 on a normal fresh run): an incomplete run-state is found and the user accepts the resume offer (R.1).
+
+Unphased runs write no run-state and are therefore never resumable -- there is nothing to resume, and re-invoking the plan just starts a fresh run.
+
+### R.1. Locate the run-state (explicit path, bare scan, or auto-detect)
+
+Resolve `run_state_path`:
+
+- **Explicit path** (`resume_path` is set): use it directly as `run_state_path`.
+- **Bare `--resume`** (`resume_flag` true, `resume_path` unset) **or the Step 1a-0 auto-detect scan**: scan for resumable run-states:
+  1. Find every `run-state.json` under `docs/plan-runner/` (Glob `docs/plan-runner/**/run-state.json`).
+  2. Read each. Keep those that parse AND whose `overall_status` is `active` AND that have at least one phase whose `status` is not `complete`. Skip every `complete` or `abandoned` run-state -- **abandoned run-states are never re-offered or resumed.** (`active` is the only resumable status: every write site sets `active`, `complete`, or `abandoned`, so an interrupted-but-resumable run is `active` with an incomplete phase.)
+  3. If none qualify: for a **bare `--resume`**, print `No resumable run found under docs/plan-runner/.` and STOP (the user asked to resume; do not silently start fresh). For the **Step 1a-0 auto-detect**, return to Step 1a and continue the fresh run silently.
+  4. Otherwise pick the most recent by `updated_at` as the candidate (note in the offer if others also exist). For a **bare `--resume`**, set `run_state_path` to the candidate and continue to R.2. For the **Step 1a-0 auto-detect**, print the offer:
+
+```
+Found an incomplete plan-runner run you can resume:
+  <run_state_path>
+  plan:    <plan_path>
+  phases:  <complete_count>/<phase_count> complete; next: phase <next phase_id>, wave <next wave>
+  updated: <updated_at>
+
+[Y] resume this run
+[n] start a fresh run on <given plan path> (marks the incomplete run abandoned)
+
+(Y/n)
+```
+
+  On `Y` (or empty default): set `run_state_path` to the candidate and continue to R.2. The plan path given on the fresh invocation is ignored -- all state comes from the run-state. On `n`: **mark the candidate `abandoned`** -- set its `overall_status` to `abandoned`, rewrite `updated_at`, write it back -- so it is not re-offered on later runs, then return to Step 1a and continue the fresh run on the given plan.
+
+### R.2. Load and validate the run-state (corrupt or missing)
+
+Read `run_state_path`. If the file does not exist, does not parse as JSON, or is missing any required field (`plan_path`, `plan_content_hash`, `phases`, `overall_status`), print the failure and offer a fresh run -- **never infer state**:
+
+```
+Cannot resume: run-state is missing or unreadable.
+  <run_state_path>
+  reason: <file not found | JSON parse error: ...  | missing field: ...>
+
+Start a fresh run instead with:
+  Claude Code:  /plan-runner:run <path-to-plan.md>
+  Codex:        $plan-runner:run <path-to-plan.md>
+```
+
+Then STOP. If `overall_status` is `complete`, print that the run already finished and STOP. If `overall_status` is `abandoned`, print that this run-state was abandoned and STOP -- abandoned run-states are never resumed.
+
+### R.3. Restore run variables (no dependency on Step 1)
+
+Derive every resumed variable from the run-state and its location, so nothing depends on Step 1's fresh-run computation:
+
+- `cycle_dir` = the parent directory of `run_state_path` (the run-state lives at the cycle root). Each phase's `directory` is recorded absolutely in the run-state; do NOT recompute cycle numbering or re-derive any path from Step 1 variables.
+- `backend`, `verify_mode`, `tdd_enabled`, and `phase_mode` = the values recorded in the run-state. Set `phasing_active = true` (a run-state exists only for a phased run) and `phase_count` = the number of entries in `phases`.
+- Re-detect host facilities that are not persisted: `git_available` per Step 1b-bis and `context7_available` per Step 1d. Re-resolve `max_waves_per_phase`, `auto_stop_phases`, and `relay_max_minutes` from `.plan-runner.yml` per Step 1d-quinquies (the phase list is already sliced, so these only feed the relay guardrail and the adaptive re-resolution in Step 3-bis.1).
+- If `tdd_enabled`, re-resolve the **test command** by Step 1d-bis's detection path; do NOT re-prompt on resume. If detection cannot resolve a command non-interactively, proceed exactly as the relay phase-runner does (Step 3-bis.0) and let the missing gate surface through the normal loop. **Defer the green-baseline capture to R.6** -- do NOT capture it here. R.6's dirty-tree stash/keep decision can still change the working tree the resumed wave re-runs over, so a baseline captured now would bake in a pre-stash tree or one still tainted by the interrupted wave's partial breakage.
+- Record `t_start = $(date +%s)` for this resumed session (the relay guardrail clock restarts per session, Step 3-bis.4).
+
+### R.4. Plan-drift guard
+
+Re-hash the plan file at `plan_path` (same tool and normalization as Step 2-bis) and compare it to the stored `plan_content_hash`. On a mismatch -- or if the plan file is now missing -- warn and **require explicit confirmation** before continuing against the already-sliced wave plan:
+
+```
+Plan file has changed since this run was checkpointed:
+  <plan_path>
+  checkpoint hash: <stored plan_content_hash>
+  current hash:    <current hash, or "file missing">
+
+Resuming runs the wave plan as sliced at checkpoint time; it does NOT re-analyze the
+edited plan. Continue against the checkpointed wave plan anyway? (y/N)
+```
+
+The default is No. On anything but an explicit `y`, STOP and suggest a fresh run to re-analyze the edited plan. Only when the hash matches (or the user explicitly confirms) proceed to R.5.
+
+### R.5. Compute the resume point
+
+- `resume_phase` = the first entry in `phases` whose `status` is not `complete`. If every phase is already `complete`, the run finished: set `overall_status` to `complete`, rewrite `updated_at`, and proceed to the terminal steps (Step 5 aggregation onward) on the terminal phase -- there is nothing left to execute.
+- Parse `resume_phase.wave_range` as `lo-hi`. Let `last = resume_phase.last_completed_wave`.
+- `resume_from_wave` = `lo` when `last` is null (the phase never started), otherwise `last + 1`. If `resume_from_wave > hi` (the interruption landed exactly on a phase boundary), the phase is effectively done: set `resume_phase.status` to `complete`, rewrite run-state, and repeat R.5 for the next incomplete phase.
+- `phase_dir` = `resume_phase.directory`.
+
+### R.6. Interrupted-wave re-dispatch (dirty tree, ask once)
+
+`resume_from_wave` is re-dispatched **from its start** -- any partial, uncommitted work left by the interruption is re-run, never assumed done. The interactive resuming session (the relay driver, or the single stop-mode session) makes the tree decision here, once, before phase execution begins.
+
+**Dirty-tree prompt (git only, ask once).** If `git_available` is true, run `git status --porcelain`. If its output is non-empty, ask before dispatching -- **never silently discard uncommitted work**:
+
+```
+Resuming into wave <resume_from_wave> (interrupted). The working tree has uncommitted changes:
+<git status --porcelain output>
+
+This wave re-runs from its start. Choose how to handle the current tree:
+  [s] stash first (git stash -u), then re-run the wave against a clean tree
+  [k] keep the changes and let this wave's agents overwrite files as needed
+
+(s/k)
+```
+
+On `s`, run `git stash -u`, then continue. On `k`, continue as-is. If the tree is clean, skip the prompt. **In no-git mode (`git_available` false), skip this prompt entirely** and re-run the wave over the working tree as-is: run-state.json alone drives resume, and every git-gated step (commit, PR, clean-tree check) stays skipped exactly as it is on a first run.
+
+**Green baseline (deferred from R.3, only if `tdd_enabled`).** Now that the tree decision above is final -- stash applied, changes kept, or tree already clean -- capture the TDD green baseline, over the actual tree the resumed wave will re-run against: run the resolved full test command and record `baseline_failing` exactly as Step 1d-bis does. Capturing it here, after the stash/keep decision resolves, is what keeps the baseline reflecting the tree state the resumed wave actually runs over -- never a pre-stash tree nor one still tainted by the interrupted wave's own partial breakage.
+
+**Rogue-commit baseline (git only).** The Step 4a rogue-commit guard runs on the re-dispatched wave against the wave's recorded start SHA: when Step 4 sets `wave_start_sha` for `resume_from_wave`, it uses the recorded `commit_sha` of the last completed wave (read from the phase manifests / run-state's `last_completed_wave`) rather than current `HEAD`, so any commit the interrupted wave made before crashing is detected as delivered work instead of being re-run blindly. When no prior wave committed, the baseline falls back to current `HEAD`.
+
+### R.7. Hand to phase execution
+
+Set `resume_phase.status` to `in_progress` and `overall_status` to `active` in the run-state, rewrite `updated_at`, and write it back. Then enter Step 3-bis at `resume_phase` with `resume_from_wave` in force (skip Step 3's wave-plan display -- it is already on disk). Step 3-bis re-resolves the effective mode (Step 3-bis.1) and runs the remaining phases from `resume_phase` forward: relay skips the already-`complete` phases and dispatches the first incomplete one (Step 3-bis.2); stop runs the first incomplete phase directly in this session (Step 3-bis.3). Step 4 begins the active phase at `resume_from_wave`, not the phase's first wave, so no completed wave re-runs. Cross-phase aggregation, the verifier-coverage gate, and every terminal step (Step 5, Step 7-bis, Step 8, the Run Report) still run only once, on the terminal phase, exactly as on a non-resumed phased run.
 
 ## Step 4: WAVE EXECUTION
 
 Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
 
-For each wave in `wave_plan.waves` (sequentially):
+For each wave in the active phase's wave range (sequentially) -- for an unphased run that is all of `wave_plan.waves`; inside a phase (a relay phase-runner or a stop-mode session) it is only that phase's wave-plan slice, so Step 4 iterates the current phase's waves and no others. **On a resumed run, iteration begins at the phase's first incomplete wave** -- `max(phase first wave, (run-state `last_completed_wave` for this phase) + 1)`, which is `resume_from_wave` (Resume step R.5). A pending phase has `last_completed_wave` null, so it starts at the phase's first wave; a partially-completed phase starts just past its last completed wave. Waves before that point already completed (recorded in run-state / the phase manifest) and are NOT re-run:
 
 Print:
 ```
 [Phase 2/4] Wave <W>/<total_W>: dispatching <N> dev agents in parallel...
 ```
 
-Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
+Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. **Resume exception:** when this wave is the resume point (`resume_from_wave`, re-dispatched after a crash or stop -- Resume step R.6), set `wave_start_sha` to the recorded `commit_sha` of the last completed wave (from run-state's `last_completed_wave` / the phase manifest) instead of current `HEAD`, so the rogue-commit guard catches any commit the interrupted wave made before it was interrupted; fall back to current `HEAD` when no prior wave committed. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
 
 ### 4a. Dispatch dev agents (parallel)
 
@@ -597,7 +982,7 @@ Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
 {"wave_id": <W>, "verifier_status": "SKIPPED", "agent_statuses": {"<each agent_id>": "BUGS_FOUND if that agent's dev_status is BLOCKED else SKIPPED"}, "bugs": ["<the BLOCKED bugs synthesized in 4b, may be empty>"]}
 ```
 
-Write the JSON to `$cycle_dir/bugs/wave-<W>.json`.
+Write the JSON to `$phase_dir/bugs/wave-<W>.json`. (`phase_dir` is `$cycle_dir` for an unphased run and `$cycle_dir/phase-<P>/` for the active phase of a phased run -- see Step 2-bis. The bug JSON keeps the global wave number, so the filename is identical either way.)
 
 Capture each dispatched verifier's token usage (see **Token accounting**). Each verifier's bug-report JSON carries a `token_usage` self-report -- the fallback source when its completion result surfaces no usage figure (do not copy the field into the wave's bug JSON). Append one `verify` entry per verifier to `token_usage.by_agent`: `{"agent": "wave-<W>-verifier", "phase": "verify", ...}` for a single-verifier wave, or one `{"agent": "wave-<W>-agent-<n>-verifier", "phase": "verify", ...}` per verifier for a `per-agent` wave. A SKIPPED wave dispatched no verifier, so it appends no `verify` entries. Store the wave's summed verifier tokens as `verifier_tokens` (null when nothing was reported).
 
@@ -670,7 +1055,7 @@ If n: STOP.
 
 ### 4f. Update manifest
 
-Append a wave entry to `$cycle_dir/manifest.json`:
+Append a wave entry to `$phase_dir/manifest.json` (`$cycle_dir/manifest.json` for an unphased run; the active phase's `$cycle_dir/phase-<P>/manifest.json` for a phased run):
 
 ```json
 {
@@ -688,33 +1073,43 @@ Append a wave entry to `$cycle_dir/manifest.json`:
 }
 ```
 
-The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the top-level `verification` counters: increment `waves_verified` when this wave got a semantic verifier, or `waves_skipped` when it was SKIPPED. Ensure `verification.waves_total` is set to the total wave count.
+The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the top-level `verification` counters: increment `waves_verified` when this wave got a semantic verifier, or `waves_skipped` when it was SKIPPED. Ensure `verification.waves_total` is set to **this phase's own wave count** -- the number of waves in this phase's wave-plan slice, NOT the cycle-wide global `W` -- so that summing `waves_total` across the phase manifests in Step 5.2 yields exactly `W` and never `phase_count * W`. (On an unphased run the phase is the whole cycle, so this phase-scoped count is `W`, byte-for-byte the old behavior.)
 
 Use Read+Write or jq to update the manifest in place. If jq is unavailable, read the JSON, mutate it in memory, write it back.
 
+**Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 5.2). This per-wave write is what makes crash recovery granular to the wave, with or without git.
+
 Record `t_wave_<W>_end = $(date +%s)`.
 
-Move to the next wave. After the last wave completes, proceed to Step 5.
+Move to the next wave. After the last wave of the range completes: on an unphased run, proceed to Step 5. Inside a phase (`phasing_active` is true), control returns to Step 3-bis at the phase boundary instead -- a relay phase-runner returns its phase-summary JSON (Step 3-bis.0), and a stop-mode session ends or, on the terminal phase, proceeds to Step 5 (Step 3-bis.3). Step 5 runs only once, on the terminal phase.
 
 ## Step 5: AGGREGATE
 
+Step 5 runs **once, on the terminal phase** of this cycle. On an unphased run the single session reaches it after the last wave; on a phased run only the terminal phase's session reaches it -- the relay driver after the terminal phase-runner returns (Step 3-bis.2), or the terminal stop-mode session (Step 3-bis.3). Intermediate phases return to Step 3-bis at their boundary and never run aggregation. Aggregation is therefore **cross-phase**: it reads the per-wave bug JSONs of every phase, not only the phase that happens to be executing, from the artifacts already on disk.
+
+**Resolve the bug-JSON locations for the whole cycle.** Each wave's bug JSON lives in its own phase's `bugs/` directory under its preserved global wave number:
+- **Unphased run** (`phasing_active` false): every bug JSON is in `$cycle_dir/bugs/` -- byte-for-byte today's single-directory aggregation.
+- **Phased run** (`phasing_active` true): wave `<W>`'s bug JSON is `$cycle_dir/phase-<P>/bugs/wave-<W>.json`, where `<P>` is the phase owning wave `<W>` (from the run-state `phases` wave ranges). The union across `phase-1/bugs/` .. `phase-<phase_count>/bugs/` is the complete set. `bugs.md` and `fix-plan.md` are written once, at the cycle root (`$cycle_dir`), as the terminal-phase aggregation output.
+
+Below, "wave `<W>`'s bug JSON" means that per-phase path on a phased run and `$cycle_dir/bugs/wave-<W>.json` on an unphased run.
+
 ### 5.0. Verifier-coverage gate (runs before counting, on every path)
 
-Before counting bugs, assert that **every** wave `1..W` produced a verdict. For each wave, check that `$cycle_dir/bugs/wave-<W>.json` exists and parses with a non-null `verifier_status`.
+Before counting bugs, assert that **every** wave `1..W` of every phase produced a verdict: check that wave `<W>`'s bug JSON (`$cycle_dir/bugs/wave-<W>.json` unphased, else `$cycle_dir/phase-<P>/bugs/wave-<W>.json`) exists and parses with a non-null `verifier_status`. The sweep spans all phases, so a verdict missing from an earlier phase is caught here at terminal aggregation -- it is never left behind when that phase's session ended.
 
-If any wave's bug JSON is missing or has a null `verifier_status`, the verifier for that wave never landed -- the wave must not be treated as clean. For each such wave, synthesize and write:
+If any wave's bug JSON is missing or has a null `verifier_status`, the verifier for that wave never landed -- the wave must not be treated as clean. For each such wave, synthesize and write it to that wave's phase `bugs/` directory:
 
 ```json
 {"wave_id": <W>, "verifier_status": "UNVERIFIABLE", "agent_statuses": {}, "bugs": [{"bug_id": "wave-<W>-bug-1", "severity": "P2", "category": "incorrect_implementation", "title": "Wave <W> verifier verdict missing -- wave closed without verification", "file": "n/a", "line": null, "evidence": "No bugs/wave-<W>.json with a verifier_status was found at aggregation time.", "expected": "Every wave is gated by its verifier before the cycle closes", "suggested_fix": "Re-run this cycle's wave <W> so the verifier produces a verdict"}]}
 ```
 
-Print a warning naming each backfilled wave. This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict is still outstanding.
+Print a warning naming each backfilled wave (and its phase). This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict for any wave of any phase is still outstanding. It remains upstream of the PR step on every path across phases: the terminal phase runs it before Step 7-bis / Step 8 can execute, and no intermediate phase reaches those steps at all.
 
 A wave whose bug JSON carries `verifier_status: "SKIPPED"` was intentionally left unverified by `verify_mode` (e.g. an earlier wave under `last-wave-only`). `SKIPPED` is a present, non-null status, so this gate does NOT backfill it and does NOT treat it as a bug. The gate still backfills `UNVERIFIABLE` for any wave that was in scope for a semantic verifier but whose `bugs/wave-<W>.json` is missing or has a null `verifier_status` -- a dispatched verifier that never landed is still a tracked gap, exactly as before. So the "structurally impossible to open a PR while a requested verdict is outstanding" guarantee holds, while an intentional skip stays honest rather than masquerading as clean.
 
 ### 5.1. Count and aggregate
 
-Count total bugs across all bug JSONs. If total bugs == 0:
+Count total bugs across all bug JSONs -- the cross-phase set resolved at the top of Step 5 (every phase's `bugs/` on a phased run; `$cycle_dir/bugs/` on an unphased run). If total bugs == 0:
 
 ```
 [Phase 3/4] All waves complete. Zero bugs flagged -- skipping aggregation.
@@ -722,7 +1117,7 @@ Count total bugs across all bug JSONs. If total bugs == 0:
 
 Finalize the token tally: compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` from `token_usage.by_agent` (see **Token accounting**). No aggregator runs on this path, so it contributes no entry.
 
-Update manifest: `total_bugs: 0`, `token_usage: <finalized tally>`, `completed_at: <ISO timestamp>`. Skip to Step 7 (final summary).
+Update manifest: `total_bugs: 0`, `token_usage: <finalized tally>`, `completed_at: <ISO timestamp>`. Then run 5.2 (cross-phase roll-up + run-state completion) and skip to Step 7 (final summary).
 
 If total bugs > 0:
 
@@ -738,20 +1133,22 @@ You are being deployed as the plan-aggregator for plan-runner cycle <cycle_n>.
 cycle_dir: <absolute path to $cycle_dir>
 input_plan: <absolute path to the original plan>
 
-Read all bug JSONs under <cycle_dir>/bugs/*.json.
-Read the wave plan at <cycle_dir>/wave-plan.json for task context.
+Read all of this cycle's bug JSONs: <cycle_dir>/phase-*/bugs/*.json (every phase, on a
+phased run) or <cycle_dir>/bugs/*.json (on an unphased run) -- pass whichever set applies.
+Read the canonical wave plan at <cycle_dir>/wave-plan.json for task context.
 
-Write bugs.md and fix-plan.md to <cycle_dir> as instructed. Return the status JSON.
+Write bugs.md and fix-plan.md to <cycle_dir> (the cycle root) as instructed. Return the status JSON.
 ```
 
 The aggregator writes the two files itself. When it returns, parse its status JSON. Capture the aggregator's token usage (see **Token accounting**; its status JSON carries a `token_usage` self-report as the fallback source) and append it to `token_usage.by_agent` as `{"agent": "aggregator", "phase": "aggregate", ...}`.
 
 If the aggregator crashes or returns non-JSON:
 ```
-Aggregator failed -- bug JSONs are intact at <cycle_dir>/bugs/.
+Aggregator failed -- bug JSONs are intact under the cycle's bug directories
+(<cycle_dir>/phase-*/bugs/ on a phased run, else <cycle_dir>/bugs/).
 You can run aggregation manually by re-invoking the agent.
 ```
-Skip to Step 7 with `total_bugs = <count>`, `next_cycle_plan = null`.
+Run 5.2 (cross-phase roll-up + run-state completion), then skip to Step 7 with `total_bugs = <count>`, `next_cycle_plan = null`.
 
 Finalize the token tally: compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` from `token_usage.by_agent` (see **Token accounting**).
 
@@ -760,6 +1157,22 @@ Update manifest:
 - `token_usage: <finalized tally>`
 - `next_cycle_plan: <fix-plan path from aggregator>`
 - `completed_at: <ISO timestamp>`
+
+Then run 5.2 (cross-phase roll-up + run-state completion) and proceed to Step 6.
+
+### 5.2. Cross-phase roll-up and run-state completion
+
+Run this subsection at the end of Step 5 on **every** path (zero-bug, bugs-found, and aggregator-failure), before routing to Step 6 or Step 7. It reconciles a phased run's per-phase artifacts into one cross-phase view and closes the run-state.
+
+**Unphased run** (`phasing_active` false): skip the roll-up -- `$cycle_dir/manifest.json` already holds the whole cycle (Step 4f appended every wave to it) and the token tally finalized in 5.1 is already complete -- and skip the run-state completion (an unphased run never wrote a run-state). Proceed unchanged.
+
+**Phased run** (`phasing_active` true): the terminal session holds only the terminal phase locally -- the relay driver dispatched no dev agents or verifiers itself, and each phase wrote its own `phase-<P>/manifest.json` -- so roll the phases up from disk before reporting:
+
+1. **Tokens (non-null only, honest coverage).** Read every `$cycle_dir/phase-<P>/manifest.json` and take the union of all phases' top-level `by_agent` arrays -- each phase persisted its own scoped tally at its boundary (relay phase-runner exit, Step 3-bis.0; stop boundary, Step 3-bis.3), so every phase manifest carries one. Then **explicitly fold in the analyzer's and aggregator's cycle-level entries from this terminal/driver session's in-memory `token_usage.by_agent`** -- those two agents belong to no phase (the analyzer ran in Step 2 of the driver/first session, the aggregator in Step 5.1 of this terminal session), so they are absent from the relay phase manifests and would be dropped otherwise. **Deduplicate the combined set by `agent` label** so an entry already present in a phase manifest (e.g. the analyzer captured in phase 1's stop-mode manifest) is counted exactly once. Recompute the tally over the deduplicated union with **Step 5.1's own computation**: `total_tokens` = the sum of every **non-null** per-agent `total`; `agents_total` = the count of entries in the union; `agents_reported` = the count of entries whose `total` is non-null; `complete` = `agents_reported == agents_total`. An agent left `null` in its phase manifest stays excluded from the sums and is never rescued with a guess. When `complete` is false the total is a lower bound -- the Run Report's honesty line (`! Tokens are a lower bound ...`) fires off this aggregated coverage.
+2. **Timing.** The Wave-execution figure is the sum of every phase's wave `duration_seconds`; the other Run Report timing rows (Pre-flight, Analyze plan, Aggregation, Sync code atlas, Open PR) come from this terminal session's own timestamps.
+3. **Bugs and verification.** `total_bugs` is the cross-phase count from 5.1. `verification.waves_total` is the global wave count `W`, taken directly from the cycle-root `wave-plan.json` -- equivalently the sum of every phase manifest's phase-scoped `waves_total` (Step 4f), which equals `W` by construction. Either way it must resolve to `W` and never `phase_count * W`. `waves_verified` / `waves_skipped` are the sums across all phase manifests.
+4. **Write the roll-up to the cycle-root manifest.** Set `$cycle_dir/manifest.json` (the pre-slice starter from Step 1e) `token_usage` to the aggregated tally, plus the aggregated `total_bugs`, the summed `verification` counters, `next_cycle_plan` (fix-plan path or null), and `completed_at`. The cycle-root manifest is the single artifact the PR step and the Run Report read for cross-phase totals; the per-phase manifests are left intact for detail.
+5. **Complete the run-state.** The terminal phase has finished, so set the run-state (`$cycle_dir/run-state.json`) `overall_status` to `complete`, mark the terminal phase's `status` `complete` if it is not already, rewrite `updated_at`, and write it back. This is the single point where a phased cycle's run-state reaches `complete`, and it fires on every terminal path -- clean, bugs-found `Y` handoff (the current cycle's phases are all done; the fix-plan re-run is a separate new cycle with its own run-state), and bugs-found `n`. A `complete` run-state is never re-offered or resumed by pre-flight auto-detect (Resume step R.1).
 
 ## Step 6: RE-RUN PROMPT (only if total_bugs > 0)
 
@@ -795,6 +1208,8 @@ Run plan-runner again with the generated fix-plan to address these bugs?
 
 (Y/n)
 ```
+
+A fix-plan re-run is a normal run through this same pipeline and **inherits phasing automatically, by the same rules -- no special-casing.** The fresh session (or the in-place teams re-run) reads `fix-plan.md` as its plan, analyzes it, and slices it in Step 2-bis exactly like a first cycle: when the fix-plan's own wave plan exceeds `max_waves_per_phase` it phases, writing its own per-cycle run-state; when it fits, it runs unphased. There is no phasing branch specific to fix-plan cycles -- the current (just-completed) phased cycle's run-state is already `complete` (Step 5.2), and the re-run starts a new cycle with a fresh checkpoint.
 
 If `n`: print `Stopping fix-plan re-run. Proceeding to code-atlas sync + PR step.` Proceed to Step 7-bis.
 
@@ -832,8 +1247,11 @@ Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 
 This step keeps a code-atlas architecture index in sync with what this cycle just
 implemented. All wave changes are already committed to disk (Step 4e), so the atlas
-update picks them up automatically. It runs on the terminal cycle only -- the Step 6
-"Y" re-run handoff never reaches this step, so intermediate fix cycles do not re-index.
+update picks them up automatically. It runs on the **terminal phase of the terminal
+cycle only** -- the Step 6 "Y" re-run handoff never reaches this step, so intermediate
+fix cycles do not re-index; and on a phased run only the terminal phase's session
+reaches Step 5 and beyond (Step 3-bis routes every intermediate phase back at its
+boundary), so code-atlas sync runs exactly once, never at an intermediate phase boundary.
 
 `code-atlas:update` writes only to `.code-atlas/` (gitignored by the map skill), so
 this step produces nothing committable and never changes the PR diff. It is purely a
@@ -880,6 +1298,8 @@ Proceed to Step 8.
 
 ## Step 8: OPEN PR
 
+Like Step 7-bis, this runs on the **terminal phase of the terminal cycle only**: it is downstream of the Step 5 cross-phase aggregation and the verifier-coverage gate, which only the terminal phase's session executes, so a PR is opened exactly once for the whole multi-phase run -- never at an intermediate phase boundary, and never while any wave of any phase still lacks a verdict. It reads the cycle-root `manifest.json` roll-up (Step 5.2) for cross-phase totals.
+
 If `git_available` is false, skip this step entirely. Print:
 
 ```
@@ -910,3 +1330,5 @@ print its confirmation line verbatim, then proceed to the End-of-run Run Report 
 Always reached as the last thing before a normal STOP (clean path, bugs-found `n` path, and git-absent path); never reached on the bugs-found `Y` handoff (that cycle STOPs after the handoff) or on an early-exit error STOP.
 
 Compute the per-phase durations from the timestamps recorded through the run (Pre-flight, Analyze plan, Wave execution, Aggregation, Sync code atlas, Open PR) and the `Total`, excluding the User-confirm wait. Then render and print the **End-of-run Run Report** exactly per its spec in the Token accounting section -- status-aware title, two-column stat header, honesty lines, `Tokens by phase` table, `Timing by phase` table (using the durations just computed), and the `Artifacts` block. Then STOP.
+
+On a phased run, this single report covers the whole multi-phase cycle: its token figures, coverage counters, `Waves` / `Dev agents` / `Verifiers` / `Commits` stats, bug count, and Wave-execution time come from the cross-phase roll-up computed in Step 5.2 (the sum across every phase's `manifest.json`), not from the terminal session's local tally. Token sums include non-null values only; the `! Tokens are a lower bound` honesty line prints whenever the aggregated coverage is partial (`agents_reported < agents_total` across the phases). The report still prints exactly once, only here on the terminal phase -- intermediate phases printed only the compact Intermediate phase summary.

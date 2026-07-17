@@ -17,8 +17,8 @@
         "properties": {"library": {"type": "string"}, "purpose": {"type": "string"}}
       }
     },
-    "summary": {"type": "string"},
-    "concerns": {"type": "array", "items": {"type": "string"}},
+    "summary": {"type": "string", "maxLength": 2000, "description": "Distilled summary of what the agent accomplished or attempted. Pre-1.13.0 artifacts uncapped."},
+    "concerns": {"type": "array", "items": {"type": "string", "maxLength": 1000}, "description": "Any reservations or open questions. Pre-1.13.0 artifacts uncapped."},
     "test_files": {"type": "array", "items": {"type": "string"}, "description": "test-author role: test files written, for orchestrator-scoped gate runs."},
     "test_ids": {"type": "array", "items": {"type": "string"}, "description": "test-author role: individual test names/IDs added."},
     "token_usage": {
