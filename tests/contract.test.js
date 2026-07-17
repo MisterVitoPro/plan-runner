@@ -641,8 +641,8 @@ test("run-state schema exists, parses, and documents the phase-checkpoint lifecy
   }
   assert.deepEqual(
     schema.properties.overall_status.enum,
-    ["active", "abandoned", "complete", "interrupted"],
-    "overall_status enum covers the resumability lifecycle"
+    ["active", "abandoned", "complete"],
+    "overall_status enum lists only the values write sites actually set (no dead 'interrupted')"
   );
   assert.deepEqual(
     schema.properties.phases.items.properties.status.enum,
@@ -654,4 +654,101 @@ test("run-state schema exists, parses, and documents the phase-checkpoint lifecy
   assert.ok(exists("schemas/examples/run-state.invalid.json"), "invalid run-state fixture must exist");
   const validator = read("tests/validate_schemas.py");
   assert.match(validator, /run-state\.schema\.json.{0,10}run-state\.valid\.json.{0,10}run-state\.invalid\.json/, "validate_schemas.py wires up the run-state case");
+});
+
+test("phase boundaries persist their scoped token tally so the cross-phase roll-up is complete", () => {
+  const f = read("skills/run/SKILL.md");
+  // relay phase-runner exit (Step 3-bis.0) persists its own scoped token_usage to the phase manifest
+  assert.match(
+    f,
+    /finalize and persist this phase's own scoped token tally before returning/i,
+    "relay phase-runner finalizes and persists its scoped token tally before returning"
+  );
+  // stop-mode boundary (Step 3-bis.3) does the same at every boundary
+  assert.match(
+    f,
+    /at every stop boundary \(terminal and non-terminal alike\)/i,
+    "stop-mode boundary persists its scoped token tally at every boundary"
+  );
+  // both use the same computation as Step 5.1's tally finalization and write to the phase manifest
+  assert.match(
+    f,
+    /same computation as Step 5\.1's tally finalization[\s\S]{0,200}\$phase_dir\/manifest\.json/i,
+    "phase-manifest token persistence reuses Step 5.1's finalization computation"
+  );
+  // Step 5.2 folds the cycle-level analyzer + aggregator into the cross-phase union
+  assert.match(
+    f,
+    /explicitly fold in the analyzer's and aggregator's cycle-level entries/i,
+    "Step 5.2 folds the cycle-level analyzer + aggregator into the cross-phase token union"
+  );
+  assert.match(
+    f,
+    /[Dd]eduplicate the combined set by `?agent`? label/,
+    "the fold-in deduplicates by agent label so nothing is double-counted"
+  );
+});
+
+test("relay phase-runner derives cycle_dir from the run-state path", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(
+    f,
+    /[Dd]erive `?cycle_dir`? = the \*\*parent directory of `?run_state_path`?\*\*/,
+    "relay phase-runner derives cycle_dir from run_state_path's parent before Step 4f's rewrite"
+  );
+});
+
+test("resume defers the TDD green-baseline capture until after the dirty-tree decision", () => {
+  const f = read("skills/run/SKILL.md");
+  // R.3 no longer captures the baseline; it defers to R.6
+  assert.match(f, /Defer the green-baseline capture to R\.6/i, "R.3 defers the green-baseline capture to R.6");
+  // R.6 captures it after the stash/keep decision resolves
+  assert.match(f, /\*\*Green baseline \(deferred from R\.3/, "R.6 captures the deferred green baseline");
+  assert.match(
+    f,
+    /after the stash\/keep decision resolves[\s\S]{0,160}(pre-stash|tainted)/i,
+    "baseline is captured after R.6 resolves so it reflects the tree the wave re-runs over"
+  );
+});
+
+test("waves_total is phase-scoped per manifest and cannot overcount by phase_count", () => {
+  const f = read("skills/run/SKILL.md");
+  // Step 4f writes a phase-scoped waves_total
+  assert.match(
+    f,
+    /`?verification\.waves_total`? is set to \*\*this phase's own wave count\*\*/,
+    "Step 4f sets a phase-scoped waves_total"
+  );
+  // both Step 4f and Step 5.2 rule out phase_count * W
+  const overcountMatches = f.match(/phase_count \* W/g) || [];
+  assert.ok(overcountMatches.length >= 2, "both Step 4f and Step 5.2 explicitly rule out phase_count * W");
+  // Step 5.2 resolves waves_total to the global W from the cycle-root wave plan
+  assert.match(
+    f,
+    /`?verification\.waves_total`? is the global wave count `?W`?, taken directly from the cycle-root `?wave-plan\.json`?/,
+    "Step 5.2 resolves waves_total to the global W"
+  );
+});
+
+test("stale (Step 7) cross-phase summation references were corrected to (Step 5.2)", () => {
+  const f = read("skills/run/SKILL.md");
+  // the two summation cross-refs now name Step 5.2
+  assert.match(f, /sums across the per-phase manifests \(Step 5\.2\)/, "relay-driver summary ref points at Step 5.2");
+  assert.match(f, /terminal-phase reporting \(Step 5\.2\) sums across the per-phase manifests/, "Step 2-bis ref points at Step 5.2");
+  // no summation cross-ref still points at Step 7
+  assert.doesNotMatch(f, /per-phase manifests \(Step 7\)|\(Step 7\) sums across the per-phase manifests/, "no stale (Step 7) summation ref remains");
+});
+
+test("resume scan keeps only active run-states (no dead 'interrupted' filter)", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(
+    f,
+    /Keep those that parse AND whose `?overall_status`? is `?active`? AND that have at least one phase/,
+    "R.1 keeps run-states whose overall_status is active"
+  );
+  assert.doesNotMatch(
+    f,
+    /`?overall_status`? is `?active`? or `?interrupted`?/,
+    "R.1 no longer filters on the unreachable 'interrupted' status"
+  );
 });
