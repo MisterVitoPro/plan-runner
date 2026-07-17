@@ -67,7 +67,7 @@ Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), ever
 
 ### End-of-run Run Report
 
-The terminal end of a cycle prints one **Run Report** -- a single ASCII block (fixed 60-column width, no Unicode box-drawing, no color) that presents the whole cycle at a glance and then in detail. It is rendered from the finalized `token_usage` tally (above) and the phase-timing tally. It prints once, as the last output before STOP, on every terminal path: the clean run, the bugs-found run after the user declines the re-run, and the git-absent path. It does NOT print on the bugs-found re-run *handoff* path (user picks `Y`) -- that intermediate cycle prints only the compact decision block (Step 6) and hands off; its full tally still lands in `manifest.json`.
+The terminal end of a cycle prints one **Run Report** -- a single ASCII block (fixed 60-column width, no Unicode box-drawing, no color) that presents the whole cycle at a glance and then in detail. It is rendered from the finalized `token_usage` tally (above) and the phase-timing tally. On a phased run the tally and timing come from the **cross-phase roll-up** (Step 5.2 -- the sum across every phase's `manifest.json`, non-null token values only, coverage counters aggregated), so the single Run Report still reflects the entire multi-phase cycle rather than just the terminal phase. It prints once, as the last output before STOP, on every terminal path: the clean run, the bugs-found run after the user declines the re-run, and the git-absent path. It does NOT print on the bugs-found re-run *handoff* path (user picks `Y`) -- that intermediate cycle prints only the compact decision block (Step 6) and hands off; its full tally still lands in `manifest.json`.
 
 Clean run:
 
@@ -124,6 +124,20 @@ Rendering rules:
 - **Tokens by phase** table: group `by_agent` entries by `phase` (`analyze` -> Analyze, `wave` -> Dev, `verify` -> Verify, `aggregate` -> Aggregate); omit a phase row entirely when no subagent was dispatched in that phase (e.g. Aggregate on a zero-bug run). `Agents` = subagents dispatched in the phase; `Reported` = how many surfaced a usage figure. Input / Output / Total are sums of the **non-null** values only, with thousands separators; print `n/a` for a cell where nothing in that phase reported a figure. Never fabricate a number. The `Total` row's Total cell equals `token_usage.total_tokens`. `Top consumers` lists up to 3 agents with the largest non-null `total`, formatted `<agent> (<total>)`; omit the line when no agent reported. The coverage figure is not repeated here -- it lives once, in the stat header.
 - **Timing by phase** table lists each phase's elapsed time as `Xm Ys`: Pre-flight, Analyze plan, Wave execution (annotated `(<W> waves)`), Aggregation (omit the row on a zero-bug run, where no aggregator ran), Sync code atlas (mark skipped when git is absent or code-atlas is not present), Open PR (mark skipped when git is absent), and a `Total`. `User confirm` is excluded from the total.
 - **Artifacts** always lists `Manifest`; it adds `Bug report` and `Fix plan` rows only when `total_bugs > 0`.
+
+### Intermediate phase summary (phased runs)
+
+At every **non-terminal** phase boundary a phased run prints a compact phase summary -- **never the full Run Report**, which is a terminal-only, once-per-run artifact. The relay driver prints it after each phase-runner returns (Step 3-bis.2); a stop-mode session prints it before ending at the boundary (Step 3-bis.3); the wall-time guardrail reuses the stop form (Step 3-bis.4). It is a small fixed block covering the phase just finished -- waves run, bugs so far, tokens with coverage, and the next action -- and nothing more:
+
+```
+Phase <P>/<phase_count> complete -- waves <lo>-<hi> (<n> waves)
+  Bugs so far    <cumulative bug count, phases 1..P>
+  Tokens so far  <sum of non-null totals, phases 1..P> (<agents_reported>/<agents_total> agents)
+  Next           <phase <P+1>: relay dispatch | stop + resume | resume command>
+```
+
+- **Bugs so far** and **Tokens so far** are cumulative across phases `1..P`, read from the phase manifests already on disk (`phase-1..P/manifest.json`), so the operator sees the run's running total while the driver holds no wave-level context. Tokens sum **non-null values only**; when coverage across those phases is partial (`agents_reported < agents_total`), append ` -- lower bound` to the Tokens line, mirroring the Run Report's honesty rule. Never fabricate a token count for an agent that stayed `null` in its phase manifest.
+- **Next** names what follows this boundary: relaying into phase `<P+1>`, or stopping with the copy-pasteable resume invocation (stop mode, guardrail, or teams backend). This block is compact by contract -- it MUST NOT expand into the token/timing tables, the status header, or the artifacts list of the full Run Report. The full Run Report prints exactly once, only on the terminal phase.
 
 ## Step 1: PRE-FLIGHT
 
@@ -518,7 +532,7 @@ Compute `plan_content_hash` with an available hashing tool (`sha256sum "<plan pa
 
 1. **At slicing time (here):** the initial write above -- all phases `pending`, `overall_status: "active"`.
 2. **After every wave completion (Step 4f):** set the active phase's `last_completed_wave` to the just-finished global wave number and its `status` to `in_progress`.
-3. **At every phase boundary:** when a phase's last wave completes, set that phase's `status` to `complete`; set the next phase's `status` to `in_progress` (or, when the terminal phase of the terminal cycle finishes, set `overall_status` to `complete` in Step 7).
+3. **At every phase boundary:** when a phase's last wave completes, set that phase's `status` to `complete`; set the next phase's `status` to `in_progress` (or, when the terminal phase finishes, set `overall_status` to `complete` during terminal roll-up, Step 5.2).
 
 Print the phase plan:
 
@@ -645,7 +659,7 @@ Do not aggregate, do not open a PR, do not run any terminal step.
 3. Wait for the phase-runner to return. Parse its phase-summary JSON. If it does not parse, or `status` is `interrupted`, treat the phase as interrupted: run-state already records the last completed wave, so offer resume in-session or stop with the resume invocation (the resume path). Do NOT drive later phases over an interrupted one.
 4. Record the phase summary (waves, bug count, token tally with coverage, `manifest_path`) for the terminal Run Report, which sums across the per-phase manifests (Step 7). The driver keeps ONLY this summary -- never the phase's per-wave agent returns or transcripts.
 5. Tear down the phase-runner subagent with the host-native stop facility once its summary is captured; it must not idle after returning.
-6. Print the compact intermediate phase summary (waves run, bugs so far, tokens with coverage, next action) and continue to phase `P+1`.
+6. Print the compact intermediate phase summary (the **Intermediate phase summary** block in the Token accounting section -- waves run, bugs so far, tokens with coverage, next action; never the full Run Report) and continue to phase `P+1`.
 
 After the terminal phase's runner returns (and the guardrail has not tripped), proceed to Step 5 for cross-phase aggregation over every phase's `bugs/` directory. The driver never dispatched a dev agent or verifier itself, so it carries no wave-level context into aggregation.
 
@@ -656,9 +670,9 @@ Stop mode fully resets the host process at each boundary: each session runs exac
 In this session, execute the first phase whose run-state `status` is not `complete` (on the initial run that is phase 1; on a resumed session the resume path selects it):
 
 1. Run Step 4 over that phase's wave range only, directly in this session -- the full per-wave barrier, gates, verification, teardown, commit, and per-wave manifest + run-state updates, unchanged -- writing every artifact to that phase's `phase_dir`.
-2. When the phase's last wave completes, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 7); confirm it reflects the boundary before ending.
+2. When the phase's last wave completes, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 5.2); confirm it reflects the boundary before ending.
 3. Then:
-   - **More phases remain:** print the compact phase summary followed by a copy-pasteable resume invocation, and end the session cleanly (STOP). Do NOT run Step 5 or any terminal step -- the fresh resumed process runs the next phase.
+   - **More phases remain:** print the compact phase summary (the **Intermediate phase summary** block, not the full Run Report) followed by a copy-pasteable resume invocation, and end the session cleanly (STOP). Do NOT run Step 5 or any terminal step -- the fresh resumed process runs the next phase.
 
 ```
 Phase <P>/<phase_count> complete. Stopping here for a full process reset before phase <P+1>.
@@ -1061,7 +1075,7 @@ The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the to
 
 Use Read+Write or jq to update the manifest in place. If jq is unavailable, read the JSON, mutate it in memory, write it back.
 
-**Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 7). This per-wave write is what makes crash recovery granular to the wave, with or without git.
+**Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 5.2). This per-wave write is what makes crash recovery granular to the wave, with or without git.
 
 Record `t_wave_<W>_end = $(date +%s)`.
 
@@ -1069,23 +1083,31 @@ Move to the next wave. After the last wave of the range completes: on an unphase
 
 ## Step 5: AGGREGATE
 
+Step 5 runs **once, on the terminal phase** of this cycle. On an unphased run the single session reaches it after the last wave; on a phased run only the terminal phase's session reaches it -- the relay driver after the terminal phase-runner returns (Step 3-bis.2), or the terminal stop-mode session (Step 3-bis.3). Intermediate phases return to Step 3-bis at their boundary and never run aggregation. Aggregation is therefore **cross-phase**: it reads the per-wave bug JSONs of every phase, not only the phase that happens to be executing, from the artifacts already on disk.
+
+**Resolve the bug-JSON locations for the whole cycle.** Each wave's bug JSON lives in its own phase's `bugs/` directory under its preserved global wave number:
+- **Unphased run** (`phasing_active` false): every bug JSON is in `$cycle_dir/bugs/` -- byte-for-byte today's single-directory aggregation.
+- **Phased run** (`phasing_active` true): wave `<W>`'s bug JSON is `$cycle_dir/phase-<P>/bugs/wave-<W>.json`, where `<P>` is the phase owning wave `<W>` (from the run-state `phases` wave ranges). The union across `phase-1/bugs/` .. `phase-<phase_count>/bugs/` is the complete set. `bugs.md` and `fix-plan.md` are written once, at the cycle root (`$cycle_dir`), as the terminal-phase aggregation output.
+
+Below, "wave `<W>`'s bug JSON" means that per-phase path on a phased run and `$cycle_dir/bugs/wave-<W>.json` on an unphased run.
+
 ### 5.0. Verifier-coverage gate (runs before counting, on every path)
 
-Before counting bugs, assert that **every** wave `1..W` produced a verdict. For each wave, check that `$cycle_dir/bugs/wave-<W>.json` exists and parses with a non-null `verifier_status`.
+Before counting bugs, assert that **every** wave `1..W` of every phase produced a verdict: check that wave `<W>`'s bug JSON (`$cycle_dir/bugs/wave-<W>.json` unphased, else `$cycle_dir/phase-<P>/bugs/wave-<W>.json`) exists and parses with a non-null `verifier_status`. The sweep spans all phases, so a verdict missing from an earlier phase is caught here at terminal aggregation -- it is never left behind when that phase's session ended.
 
-If any wave's bug JSON is missing or has a null `verifier_status`, the verifier for that wave never landed -- the wave must not be treated as clean. For each such wave, synthesize and write:
+If any wave's bug JSON is missing or has a null `verifier_status`, the verifier for that wave never landed -- the wave must not be treated as clean. For each such wave, synthesize and write it to that wave's phase `bugs/` directory:
 
 ```json
 {"wave_id": <W>, "verifier_status": "UNVERIFIABLE", "agent_statuses": {}, "bugs": [{"bug_id": "wave-<W>-bug-1", "severity": "P2", "category": "incorrect_implementation", "title": "Wave <W> verifier verdict missing -- wave closed without verification", "file": "n/a", "line": null, "evidence": "No bugs/wave-<W>.json with a verifier_status was found at aggregation time.", "expected": "Every wave is gated by its verifier before the cycle closes", "suggested_fix": "Re-run this cycle's wave <W> so the verifier produces a verdict"}]}
 ```
 
-Print a warning naming each backfilled wave. This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict is still outstanding.
+Print a warning naming each backfilled wave (and its phase). This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict for any wave of any phase is still outstanding. It remains upstream of the PR step on every path across phases: the terminal phase runs it before Step 7-bis / Step 8 can execute, and no intermediate phase reaches those steps at all.
 
 A wave whose bug JSON carries `verifier_status: "SKIPPED"` was intentionally left unverified by `verify_mode` (e.g. an earlier wave under `last-wave-only`). `SKIPPED` is a present, non-null status, so this gate does NOT backfill it and does NOT treat it as a bug. The gate still backfills `UNVERIFIABLE` for any wave that was in scope for a semantic verifier but whose `bugs/wave-<W>.json` is missing or has a null `verifier_status` -- a dispatched verifier that never landed is still a tracked gap, exactly as before. So the "structurally impossible to open a PR while a requested verdict is outstanding" guarantee holds, while an intentional skip stays honest rather than masquerading as clean.
 
 ### 5.1. Count and aggregate
 
-Count total bugs across all bug JSONs. If total bugs == 0:
+Count total bugs across all bug JSONs -- the cross-phase set resolved at the top of Step 5 (every phase's `bugs/` on a phased run; `$cycle_dir/bugs/` on an unphased run). If total bugs == 0:
 
 ```
 [Phase 3/4] All waves complete. Zero bugs flagged -- skipping aggregation.
@@ -1093,7 +1115,7 @@ Count total bugs across all bug JSONs. If total bugs == 0:
 
 Finalize the token tally: compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` from `token_usage.by_agent` (see **Token accounting**). No aggregator runs on this path, so it contributes no entry.
 
-Update manifest: `total_bugs: 0`, `token_usage: <finalized tally>`, `completed_at: <ISO timestamp>`. Skip to Step 7 (final summary).
+Update manifest: `total_bugs: 0`, `token_usage: <finalized tally>`, `completed_at: <ISO timestamp>`. Then run 5.2 (cross-phase roll-up + run-state completion) and skip to Step 7 (final summary).
 
 If total bugs > 0:
 
@@ -1109,20 +1131,22 @@ You are being deployed as the plan-aggregator for plan-runner cycle <cycle_n>.
 cycle_dir: <absolute path to $cycle_dir>
 input_plan: <absolute path to the original plan>
 
-Read all bug JSONs under <cycle_dir>/bugs/*.json.
-Read the wave plan at <cycle_dir>/wave-plan.json for task context.
+Read all of this cycle's bug JSONs: <cycle_dir>/phase-*/bugs/*.json (every phase, on a
+phased run) or <cycle_dir>/bugs/*.json (on an unphased run) -- pass whichever set applies.
+Read the canonical wave plan at <cycle_dir>/wave-plan.json for task context.
 
-Write bugs.md and fix-plan.md to <cycle_dir> as instructed. Return the status JSON.
+Write bugs.md and fix-plan.md to <cycle_dir> (the cycle root) as instructed. Return the status JSON.
 ```
 
 The aggregator writes the two files itself. When it returns, parse its status JSON. Capture the aggregator's token usage (see **Token accounting**; its status JSON carries a `token_usage` self-report as the fallback source) and append it to `token_usage.by_agent` as `{"agent": "aggregator", "phase": "aggregate", ...}`.
 
 If the aggregator crashes or returns non-JSON:
 ```
-Aggregator failed -- bug JSONs are intact at <cycle_dir>/bugs/.
+Aggregator failed -- bug JSONs are intact under the cycle's bug directories
+(<cycle_dir>/phase-*/bugs/ on a phased run, else <cycle_dir>/bugs/).
 You can run aggregation manually by re-invoking the agent.
 ```
-Skip to Step 7 with `total_bugs = <count>`, `next_cycle_plan = null`.
+Run 5.2 (cross-phase roll-up + run-state completion), then skip to Step 7 with `total_bugs = <count>`, `next_cycle_plan = null`.
 
 Finalize the token tally: compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` from `token_usage.by_agent` (see **Token accounting**).
 
@@ -1131,6 +1155,22 @@ Update manifest:
 - `token_usage: <finalized tally>`
 - `next_cycle_plan: <fix-plan path from aggregator>`
 - `completed_at: <ISO timestamp>`
+
+Then run 5.2 (cross-phase roll-up + run-state completion) and proceed to Step 6.
+
+### 5.2. Cross-phase roll-up and run-state completion
+
+Run this subsection at the end of Step 5 on **every** path (zero-bug, bugs-found, and aggregator-failure), before routing to Step 6 or Step 7. It reconciles a phased run's per-phase artifacts into one cross-phase view and closes the run-state.
+
+**Unphased run** (`phasing_active` false): skip the roll-up -- `$cycle_dir/manifest.json` already holds the whole cycle (Step 4f appended every wave to it) and the token tally finalized in 5.1 is already complete -- and skip the run-state completion (an unphased run never wrote a run-state). Proceed unchanged.
+
+**Phased run** (`phasing_active` true): the terminal session holds only the terminal phase locally -- the relay driver dispatched no dev agents or verifiers itself, and each phase wrote its own `phase-<P>/manifest.json` -- so roll the phases up from disk before reporting:
+
+1. **Tokens (non-null only, honest coverage).** Read every `$cycle_dir/phase-<P>/manifest.json`. The cross-phase `token_usage.by_agent` is the union of all phases' `by_agent` arrays. Recompute the tally over that union: `total_tokens` = the sum of every **non-null** per-agent `total`; `agents_reported` = the sum of the phases' `agents_reported`; `agents_total` = the sum of the phases' `agents_total`; `complete` = `agents_reported == agents_total`. An agent left `null` in its phase manifest stays excluded from the sums and is never rescued with a guess. When `complete` is false the total is a lower bound -- the Run Report's honesty line (`! Tokens are a lower bound ...`) fires off this aggregated coverage.
+2. **Timing.** The Wave-execution figure is the sum of every phase's wave `duration_seconds`; the other Run Report timing rows (Pre-flight, Analyze plan, Aggregation, Sync code atlas, Open PR) come from this terminal session's own timestamps.
+3. **Bugs and verification.** `total_bugs` is the cross-phase count from 5.1; `verification.waves_total` / `waves_verified` / `waves_skipped` are the sums across all phase manifests.
+4. **Write the roll-up to the cycle-root manifest.** Set `$cycle_dir/manifest.json` (the pre-slice starter from Step 1e) `token_usage` to the aggregated tally, plus the aggregated `total_bugs`, the summed `verification` counters, `next_cycle_plan` (fix-plan path or null), and `completed_at`. The cycle-root manifest is the single artifact the PR step and the Run Report read for cross-phase totals; the per-phase manifests are left intact for detail.
+5. **Complete the run-state.** The terminal phase has finished, so set the run-state (`$cycle_dir/run-state.json`) `overall_status` to `complete`, mark the terminal phase's `status` `complete` if it is not already, rewrite `updated_at`, and write it back. This is the single point where a phased cycle's run-state reaches `complete`, and it fires on every terminal path -- clean, bugs-found `Y` handoff (the current cycle's phases are all done; the fix-plan re-run is a separate new cycle with its own run-state), and bugs-found `n`. A `complete` run-state is never re-offered or resumed by pre-flight auto-detect (Resume step R.1).
 
 ## Step 6: RE-RUN PROMPT (only if total_bugs > 0)
 
@@ -1166,6 +1206,8 @@ Run plan-runner again with the generated fix-plan to address these bugs?
 
 (Y/n)
 ```
+
+A fix-plan re-run is a normal run through this same pipeline and **inherits phasing automatically, by the same rules -- no special-casing.** The fresh session (or the in-place teams re-run) reads `fix-plan.md` as its plan, analyzes it, and slices it in Step 2-bis exactly like a first cycle: when the fix-plan's own wave plan exceeds `max_waves_per_phase` it phases, writing its own per-cycle run-state; when it fits, it runs unphased. There is no phasing branch specific to fix-plan cycles -- the current (just-completed) phased cycle's run-state is already `complete` (Step 5.2), and the re-run starts a new cycle with a fresh checkpoint.
 
 If `n`: print `Stopping fix-plan re-run. Proceeding to code-atlas sync + PR step.` Proceed to Step 7-bis.
 
@@ -1203,8 +1245,11 @@ Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 
 This step keeps a code-atlas architecture index in sync with what this cycle just
 implemented. All wave changes are already committed to disk (Step 4e), so the atlas
-update picks them up automatically. It runs on the terminal cycle only -- the Step 6
-"Y" re-run handoff never reaches this step, so intermediate fix cycles do not re-index.
+update picks them up automatically. It runs on the **terminal phase of the terminal
+cycle only** -- the Step 6 "Y" re-run handoff never reaches this step, so intermediate
+fix cycles do not re-index; and on a phased run only the terminal phase's session
+reaches Step 5 and beyond (Step 3-bis routes every intermediate phase back at its
+boundary), so code-atlas sync runs exactly once, never at an intermediate phase boundary.
 
 `code-atlas:update` writes only to `.code-atlas/` (gitignored by the map skill), so
 this step produces nothing committable and never changes the PR diff. It is purely a
@@ -1251,6 +1296,8 @@ Proceed to Step 8.
 
 ## Step 8: OPEN PR
 
+Like Step 7-bis, this runs on the **terminal phase of the terminal cycle only**: it is downstream of the Step 5 cross-phase aggregation and the verifier-coverage gate, which only the terminal phase's session executes, so a PR is opened exactly once for the whole multi-phase run -- never at an intermediate phase boundary, and never while any wave of any phase still lacks a verdict. It reads the cycle-root `manifest.json` roll-up (Step 5.2) for cross-phase totals.
+
 If `git_available` is false, skip this step entirely. Print:
 
 ```
@@ -1281,3 +1328,5 @@ print its confirmation line verbatim, then proceed to the End-of-run Run Report 
 Always reached as the last thing before a normal STOP (clean path, bugs-found `n` path, and git-absent path); never reached on the bugs-found `Y` handoff (that cycle STOPs after the handoff) or on an early-exit error STOP.
 
 Compute the per-phase durations from the timestamps recorded through the run (Pre-flight, Analyze plan, Wave execution, Aggregation, Sync code atlas, Open PR) and the `Total`, excluding the User-confirm wait. Then render and print the **End-of-run Run Report** exactly per its spec in the Token accounting section -- status-aware title, two-column stat header, honesty lines, `Tokens by phase` table, `Timing by phase` table (using the durations just computed), and the `Artifacts` block. Then STOP.
+
+On a phased run, this single report covers the whole multi-phase cycle: its token figures, coverage counters, `Waves` / `Dev agents` / `Verifiers` / `Commits` stats, bug count, and Wave-execution time come from the cross-phase roll-up computed in Step 5.2 (the sum across every phase's `manifest.json`), not from the terminal session's local tally. Token sums include non-null values only; the `! Tokens are a lower bound` honesty line prints whenever the aggregated coverage is partial (`agents_reported < agents_total` across the phases). The report still prints exactly once, only here on the terminal phase -- intermediate phases printed only the compact Intermediate phase summary.
