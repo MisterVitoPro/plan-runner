@@ -34,7 +34,8 @@ Caveats: the workflow authenticates to `qa-claude-market` with the `MARKETPLACE_
 
 ## Pipeline invariants
 
-- Max 6 agents per wave; waves are file-disjoint; per-wave barrier (dispatch -> gates -> verify -> commit) holds on both backends.
+- Max 6 agents per wave; waves are file-disjoint; the per-wave dev barrier (dispatch -> gates -> commit) holds on both backends.
+- Verification is pipelined off the critical path (since 1.14): dispatched right after the wave commit against a snapshot worktree of that commit, at most one wave's verification in flight, every verdict drained before aggregation. `--sync-verify` / `verification.pipelined: false` restores synchronous per-wave verification; no-git and no-commit waves are always synchronous.
 - Resolve pipeline role files relative to the active `SKILL.md` and include their instructions in native subagent prompts. Never depend on Codex automatically registering `agents/` files.
 - git is optional: every git operation must be gated on `git_available`.
 - Agents keep least-privilege `tools:` frontmatter — verifier and analyzer are read-only (`Read, Grep, Glob`); aggregator adds only `Write`. Don't broaden these without a reason recorded in the agent's rules.
