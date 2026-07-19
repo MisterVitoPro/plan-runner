@@ -27,12 +27,13 @@ Tokenize the skill invocation input on whitespace. The first non-flag token is t
 - `--no-tdd` -- if present, disable TDD and run the classic (non-TDD) pipeline. Set `tdd_enabled = false`. TDD is ON by default; this flag is the only way to turn it off.
 - `--test-cmd "<cmd>"` -- optional explicit test command. May include a `{file}` placeholder for single-file runs (e.g. `pytest {file}`). When provided, it is used verbatim and detection is skipped.
 - `--verify <mode>` -- optional verification coverage mode: one of `per-agent`, `per-wave`, `last-wave-only`. Overrides `.plan-runner.yml`. When absent, the config file (or the `per-wave` default) decides. Capture its value as `verify_mode_flag` (unset if the flag is absent).
+- `--sync-verify` -- if present, disable pipelined verification: each wave's verifier is dispatched and awaited before the next wave begins (the pre-1.14 synchronous behavior). Overrides `.plan-runner.yml` `verification.pipelined`. This is the pipelining kill-switch. Set `sync_verify_flag = true`.
 - `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
 - `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
 - `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
 - `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under `docs/plan-runner/`. A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Set `sync_verify_flag = true` if `--sync-verify` is present, otherwise `sync_verify_flag = false`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--sync-verify`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
 
 ## Timing
 
@@ -63,7 +64,7 @@ Maintain a running `token_usage` tally in memory across the whole cycle and writ
 }
 ```
 
-Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), every dev agent (Step 4a), every wave verifier (Step 4b), and the aggregator (Step 5). `agent` is the subagent label (`analyzer`, `wave-<W>-agent-<n>`, `wave-<W>-verifier`, `aggregator`); `phase` is one of `analyze | wave | verify | aggregate`.
+Append one `by_agent` entry per dispatched subagent: the analyzer (Step 2), every dev agent (Step 4a), every wave verifier (Step 4c), and the aggregator (Step 5). `agent` is the subagent label (`analyzer`, `wave-<W>-agent-<n>`, `wave-<W>-verifier`, `aggregator`); `phase` is one of `analyze | wave | verify | aggregate`.
 
 ### End-of-run Run Report
 
@@ -205,7 +206,7 @@ without any git operations: no clean-tree check, no per-wave commits, and no PR
 step. Generated artifacts remain in the cycle directory.
 ```
 
-Store `git_available` for the manifest and for the conditional git steps below (1c, 4e, 7-bis, and 8). When `git_available` is false, every step that runs `git` is skipped as noted in that step.
+Store `git_available` for the manifest and for the conditional git steps below (1c, 4b, 7-bis, and 8). When `git_available` is false, every step that runs `git` is skipped as noted in that step.
 
 ### 1c. Pre-flight clean tree check
 
@@ -321,12 +322,18 @@ Print the resolved mode and its source:
 
     Verification mode: <verify_mode> (from <--verify flag | .plan-runner.yml | default>).
 
-Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4b / Step 5.0 branching.
+Store `verify_mode` for the manifest (Step 1e) and for Step 3 / Step 4c / Step 5.0 branching.
 
 `verify_mode` controls only the semantic verifier layer:
 - `per-wave` (default): one verifier per wave, every wave -- byte-for-byte the current behavior.
 - `per-agent`: one verifier per dev agent, every wave (highest scrutiny/cost).
-- `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4c) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
+- `last-wave-only`: one verifier on the final wave only; earlier waves are recorded `SKIPPED` (Step 4d) -- an intentional, transparent absence distinct from `UNVERIFIABLE`. The red/green TDD gates (Step 4a-ter) still run on every wave regardless of `verify_mode`; a lower mode drops only the verifier's judgment of that output.
+
+**Resolve pipelining the same way.** `verify_pipelined` decides WHEN each wave's verifier runs, never whether: pipelined (default) dispatches it right after the wave commit and captures the verdict while the next wave's dev agents work; synchronous waits for the verdict before the next wave starts. Precedence: `false` if `sync_verify_flag` is set (the `--sync-verify` flag); otherwise the `.plan-runner.yml` `verification.pipelined` value (extract the single key directly, exactly as above); otherwise default `true`. Print:
+
+    Pipelined verification: <on|off> (from <--sync-verify flag | .plan-runner.yml | default>).
+
+When git is unavailable there is no commit to pin a snapshot to, so a no-git run always verifies synchronously regardless of this setting (Step 4c). Store `verify_pipelined` for Step 4c.
 
 ### 1d-quinquies. Resolve phasing config
 
@@ -582,7 +589,7 @@ Record `t_confirmed = $(date +%s)`.
 
 ## Step 3-bis: PHASE EXECUTION (driver, modes, and boundaries)
 
-This step is the phase driver. It runs after the wave plan is displayed (Step 3) and decides how the sliced phases execute: it resolves `phase_mode` to an effective mode and hosts the relay loop, the stop boundaries, and the wall-time guardrail. Per-wave behavior never changes here -- every phase runs the existing Step 4 wave loop unchanged (barrier, gates, verification per `verify_mode`, teardown, commit, manifest); this step only orchestrates *which session* runs *which phase* and *what happens at each phase boundary*.
+This step is the phase driver. It runs after the wave plan is displayed (Step 3) and decides how the sliced phases execute: it resolves `phase_mode` to an effective mode and hosts the relay loop, the stop boundaries, and the wall-time guardrail. Per-wave behavior never changes here -- every phase runs the existing Step 4 wave loop unchanged (barrier, gates, commit, pipelined verification per `verify_mode`, teardown, manifest, end-of-range drain); this step only orchestrates *which session* runs *which phase* and *what happens at each phase boundary*.
 
 **Unphased passthrough.** If `phasing_active` is false (Step 2-bis left the run unphased -- every `--no-phasing` run and every sub-threshold run), this step is a no-op: proceed directly to Step 4 and run all `W` waves in this one session exactly as today. Nothing below applies, so the sub-threshold and `--no-phasing` paths stay byte-for-byte today's pipeline.
 
@@ -594,8 +601,8 @@ Reached when THIS invocation is a relay phase-runner -- `is_phase_runner` is tru
 
 1. Read `run_state_path`. Derive `cycle_dir` = the **parent directory of `run_state_path`** (the run-state lives at the cycle root), so Step 4f's `$cycle_dir/run-state.json` rewrite has `cycle_dir` defined even though this relay phase-runner skipped Steps 1/2 where a fresh run computes it. The run-state already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt).
 2. Read that phase's wave-plan slice from `<phase_dir>/wave-plan.json`.
-3. Execute Step 4 over this phase's wave range only, **beginning at the phase's first incomplete wave** -- `max(phase first wave, this phase's run-state `last_completed_wave` + 1)`. On a freshly-dispatched (pending) phase `last_completed_wave` is null, so it starts at the phase's first wave; on a resumed phase whose runner was re-dispatched mid-phase it starts just past the last completed wave, re-running no completed wave. The full per-wave barrier, gates, verification, bug JSON, dashboard, commit, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
-4. When the phase's last wave finishes its Step 4f, **finalize and persist this phase's own scoped token tally before returning.** Compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this phase-runner session's in-memory `token_usage.by_agent` (the dev agents and verifiers this phase dispatched) using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object -- its `by_agent` array plus the four rolled-up fields -- to the top level of this phase's `$phase_dir/manifest.json`. This is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from **every** phase manifest, not just the terminal phase's. Then do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
+3. Execute Step 4 over this phase's wave range only, **beginning at the phase's first incomplete wave** -- `max(phase first wave, this phase's run-state `last_completed_wave` + 1)`. On a freshly-dispatched (pending) phase `last_completed_wave` is null, so it starts at the phase's first wave; on a resumed phase whose runner was re-dispatched mid-phase it starts just past the last completed wave, re-running no completed wave. The full per-wave barrier, gates, commit, pipelined verification, bug JSON, dashboard, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
+4. When the phase's last wave finishes and the Step 4g drain has captured every outstanding verdict, **finalize and persist this phase's own scoped token tally before returning.** Compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this phase-runner session's in-memory `token_usage.by_agent` (the dev agents and verifiers this phase dispatched) using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object -- its `by_agent` array plus the four rolled-up fields -- to the top level of this phase's `$phase_dir/manifest.json`. This is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from **every** phase manifest, not just the terminal phase's. Then do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
 
 Phase-summary return -- the ONLY thing the driver receives (never per-wave agent returns or transcripts); keep it within the ~1-2k-token return budget and point at the manifest for detail:
 
@@ -669,8 +676,8 @@ Stop mode fully resets the host process at each boundary: each session runs exac
 
 In this session, execute the first phase whose run-state `status` is not `complete` (on the initial run that is phase 1; on a resumed session the resume path selects it):
 
-1. Run Step 4 over that phase's wave range only, directly in this session -- the full per-wave barrier, gates, verification, teardown, commit, and per-wave manifest + run-state updates, unchanged -- writing every artifact to that phase's `phase_dir`.
-2. When the phase's last wave completes, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 5.2); confirm it reflects the boundary before ending. **Finalize and persist this phase's own scoped token tally now**, at every stop boundary (terminal and non-terminal alike): compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this session's in-memory `token_usage.by_agent` using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object to the top level of this phase's `$phase_dir/manifest.json`. On phase 1 that in-memory `by_agent` also carries the analyzer entry (Step 2 ran in this same session), so it rides along into phase 1's manifest; a resumed intermediate phase carries only its own dev agents and verifiers. Persisting at every boundary is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from every phase manifest before the fresh process (or terminal aggregation) takes over.
+1. Run Step 4 over that phase's wave range only, directly in this session -- the full per-wave barrier, gates, commit, pipelined verification, teardown, per-wave manifest + run-state updates, and the end-of-range drain (4g), unchanged -- writing every artifact to that phase's `phase_dir`.
+2. When the phase's last wave completes and the Step 4g drain has captured every outstanding verdict, this is a **phase boundary**. Step 4f already updated run-state at that boundary (finished phase -> `complete`, next phase -> `in_progress`, `overall_status` still `active` until the terminal phase finalizes in Step 5.2); confirm it reflects the boundary before ending. **Finalize and persist this phase's own scoped token tally now**, at every stop boundary (terminal and non-terminal alike): compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this session's in-memory `token_usage.by_agent` using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object to the top level of this phase's `$phase_dir/manifest.json`. On phase 1 that in-memory `by_agent` also carries the analyzer entry (Step 2 ran in this same session), so it rides along into phase 1's manifest; a resumed intermediate phase carries only its own dev agents and verifiers. Persisting at every boundary is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from every phase manifest before the fresh process (or terminal aggregation) takes over.
 3. Then:
    - **More phases remain:** print the compact phase summary (the **Intermediate phase summary** block, not the full Run Report) followed by a copy-pasteable resume invocation, and end the session cleanly (STOP). Do NOT run Step 5 or any terminal step -- the fresh resumed process runs the next phase.
 
@@ -813,7 +820,17 @@ Set `resume_phase.status` to `in_progress` and `overall_status` to `active` in t
 
 ## Step 4: WAVE EXECUTION
 
-Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave barrier (dispatch -> wait for all -> TDD gates -> verify -> commit -> next wave); they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), verification (4b), bug JSON (4c), dashboard (4d), commit (4e), and manifest (4f) are identical for both.
+Wave execution honors the `backend` chosen in Step 1d-ter. Both backends keep the same per-wave dev barrier (dispatch -> wait for all -> TDD gates -> commit) and the same pipelined verification; they differ only in how dev agents are dispatched and how their results are collected (4a). Teardown (4a-bis), gates (4a-ter), commit (4b), verification dispatch (4c), bug JSON (4d), dashboard (4e), manifest (4f), and the drain (4g) are identical for both.
+
+**Wave timeline (pipelined verification, the default).** A wave's verifier runs while the NEXT wave's dev agents work, so verification stays off the critical path between waves:
+
+1. 4a -- dispatch this wave's dev agents; wave barrier; rogue-commit guard.
+2. 4a-bis -- tear down this wave's dev agents. 4a-ter -- run gates (one shared full-suite run per wave).
+3. 4b -- commit the wave, then its commit-time 4f half (run-state + timing).
+4. 4c -- pick up the PREVIOUS wave's verdict if still in flight (running its 4d, 4e, and capture-half 4f), then dispatch THIS wave's verifier(s) against a snapshot of the wave commit -- and do NOT wait.
+5. Next wave. After the range's last wave: 4g drains every outstanding verdict.
+
+4d (bug JSON), 4e (dashboard), and the capture half of 4f (manifest wave entry) are **verdict-capture procedures**: they run at whichever point receives the wave's verdict -- the next wave's 4c pickup, the 4g drain, or inline on a synchronous or SKIPPED wave -- exactly once per wave. A wave verifies **synchronously** (dispatch, wait, capture inline -- the pre-1.14 order of events, minus the commit having moved ahead of it) whenever pipelining is off (`--sync-verify` / `verification.pipelined: false`), `git_available` is false, the wave has no commit to snapshot, or the snapshot failed (4c).
 
 For each wave in the active phase's wave range (sequentially) -- for an unphased run that is all of `wave_plan.waves`; inside a phase (a relay phase-runner or a stop-mode session) it is only that phase's wave-plan slice, so Step 4 iterates the current phase's waves and no others. **On a resumed run, iteration begins at the phase's first incomplete wave** -- `max(phase first wave, (run-state `last_completed_wave` for this phase) + 1)`, which is `resume_from_wave` (Resume step R.5). A pending phase has `last_completed_wave` null, so it starts at the phase's first wave; a partially-completed phase starts just past its last completed wave. Waves before that point already completed (recorded in run-state / the phase manifest) and are NOT re-run:
 
@@ -822,7 +839,7 @@ Print:
 [Phase 2/4] Wave <W>/<total_W>: dispatching <N> dev agents in parallel...
 ```
 
-Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4e) compare against it. **Resume exception:** when this wave is the resume point (`resume_from_wave`, re-dispatched after a crash or stop -- Resume step R.6), set `wave_start_sha` to the recorded `commit_sha` of the last completed wave (from run-state's `last_completed_wave` / the phase manifest) instead of current `HEAD`, so the rogue-commit guard catches any commit the interrupted wave made before it was interrupted; fall back to current `HEAD` when no prior wave committed. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
+Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record `wave_start_sha=$(git rev-parse HEAD)` -- the rogue-commit guard (below) and the wave commit (4b) compare against it. **Resume exception:** when this wave is the resume point (`resume_from_wave`, re-dispatched after a crash or stop -- Resume step R.6), set `wave_start_sha` to the recorded `commit_sha` of the last completed wave (from run-state's `last_completed_wave` / the phase manifest) instead of current `HEAD`, so the rogue-commit guard catches any commit the interrupted wave made before it was interrupted; fall back to current `HEAD` when no prior wave committed. If `git_available` is false, leave `wave_start_sha` unset and skip every check that references it.
 
 ### 4a. Dispatch dev agents (parallel)
 
@@ -873,11 +890,11 @@ For each dev agent return (both backends):
 
 **Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), read the owned-file state directly, treat any unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
 
-**Rogue-commit guard (both backends, only if `git_available` is true):** Dev agents are forbidden from committing, but one that disobeys leaves a clean working tree that makes its work look undone. Before treating any dev agent as silent-failed (missing return, empty owned-file diff, no working-tree changes) -- and before dispatching any retry or replacement agent for it -- run `git log --oneline <wave_start_sha>..HEAD -- <owned_files>` scoped to that agent's owned files. If commits appear, the agent rogue self-committed: the work counts as delivered, so do NOT dispatch a retry agent. Print a warning naming the agent and the rogue commit SHA(s), record the SHAs in the wave-state map, and let the wave verifier (4b) judge the content exactly as it would judge uncommitted work. Judging by working-tree diff alone is not sufficient evidence that an agent did nothing.
+**Rogue-commit guard (both backends, only if `git_available` is true):** Dev agents are forbidden from committing, but one that disobeys leaves a clean working tree that makes its work look undone. Before treating any dev agent as silent-failed (missing return, empty owned-file diff, no working-tree changes) -- and before dispatching any retry or replacement agent for it -- run `git log --oneline <wave_start_sha>..HEAD -- <owned_files>` scoped to that agent's owned files. If commits appear, the agent rogue self-committed: the work counts as delivered, so do NOT dispatch a retry agent. Print a warning naming the agent and the rogue commit SHA(s), record the SHAs in the wave-state map, and let the wave verifier (4c) judge the content exactly as it would judge uncommitted work. Judging by working-tree diff alone is not sufficient evidence that an agent did nothing.
 
 ### 4a-bis. Tear down wave dev agents
 
-A finished dev agent does not exit on its own -- it stays resident (an idle background task or an idle teammate) until explicitly stopped. As soon as the wave barrier above is satisfied and every dev agent's return has been captured, tear each one down immediately, before dispatching the wave verifier (4b):
+A finished dev agent does not exit on its own -- it stays resident (an idle background task or an idle teammate) until explicitly stopped. As soon as the wave barrier above is satisfied and every dev agent's return has been captured, tear each one down immediately, before the gates (4a-ter) and the wave commit (4b):
 
 - **Backend `subagent`:** release or stop the subagent with the host-native facility when it remains resident; if it exits automatically, no action is required.
 - **Backend `teams`:** stop the teammate with its agent ID (`name@team`) or bare teammate name.
@@ -888,36 +905,89 @@ Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BL
 
 If `tdd_enabled` is false, skip this step (classic pipeline).
 
-Gates are applied **per agent**, by `role`, because a single wave may mix test-author, impl, and standalone agents. For each agent in the wave, run the matching gate with an available shell and capture verbatim output. There are **No inline retries** -- every gate failure is recorded as captured output for the verifier and surfaces as a bug routed through the normal aggregate -> fix-plan -> re-run loop.
+Gates are applied **per agent**, by `role`, because a single wave may mix test-author, impl, and standalone agents -- but the FULL suite runs **once per wave**, not once per agent. For each agent in the wave, run the matching targeted gate with an available shell and capture verbatim output; then run the shared full-suite step once. There are **No inline retries** -- every gate failure is recorded as captured output for the verifier and surfaces as a bug routed through the normal aggregate -> fix-plan -> re-run loop.
 
-**Test-author agent (role: test-author) -> RED gate:**
+**Test-author agent (role: test-author) -> RED gate (targeted, per agent):**
 1. For each file in the agent's reported `test_files`, run the single-file test command (substitute `{file}`). Capture exit code + output.
-2. Run the full suite; diff the failing-test set against `tdd.baseline_failing`.
-3. Record `red_run` = `{cmd, exit, result: exit != 0 ? "FAILED" : "PASSED", valid_red: null}`. Leave `valid_red` null here -- the orchestrator cannot tell a genuine failure (import / not-implemented / assertion) from an invalid one (syntax / collection error) without analysis. The red-gate verifier (Step 4b) makes that call; backfill `valid_red` in the manifest from the verifier's verdict after 4b.
-4. This agent's `captured_test_output` (for the verifier) = the per-file run output (all `test_files`) + any new pre-existing failures from the suite diff.
+2. Record `red_run` = `{cmd, exit, result: exit != 0 ? "FAILED" : "PASSED", valid_red: null}`. Leave `valid_red` null here -- the orchestrator cannot tell a genuine failure (import / not-implemented / assertion) from an invalid one (syntax / collection error) without analysis. The red-gate verifier (Step 4c) makes that call; backfill `valid_red` in the manifest when that verdict is captured (4f).
+3. This agent's `captured_test_output` (for the verifier) = the per-file run output (all `test_files`) + the shared suite-regression block below.
 
-**Impl agent (role: impl) -> GREEN gate:**
+**Impl agent (role: impl) -> GREEN gate (targeted, per agent):**
 1. For each file in the agent's `tests_to_satisfy`, run the single-file test command (substitute `{file}`). Capture exit + output per file.
-2. Run the full suite; diff against `tdd.baseline_failing` to detect newly-broken pre-existing tests.
-3. Record `green_run` = `{cmd, exit, result: all target files passed ? "PASSED" : "FAILED"}`.
-4. `captured_test_output` = the per-file `tests_to_satisfy` run output + any new suite failures.
+2. Record `green_run` = `{cmd, exit, result: all target files passed ? "PASSED" : "FAILED"}`.
+3. `captured_test_output` = the per-file `tests_to_satisfy` run output + the shared suite-regression block below.
 
 **Standalone agent (role: standalone or classic):** no gate; `captured_test_output` is empty.
 
+**Shared full-suite run (once per wave, not per agent):** after the targeted runs, if this wave gated at least one test-author or impl agent, run the FULL test command exactly once and diff the failing-test set against `tdd.baseline_failing`. Split the new failures: a new failing test that belongs to one of this wave's test-author `test_files` is that agent's expected red, not a regression. Every other new failure is a wave-level regression -- append one identical block labeled `WAVE SUITE REGRESSIONS (one shared suite run for the wave)`, listing those tests verbatim, to EVERY gated agent's `captured_test_output`; the verifier attributes each regression to the responsible agent(s) by owned files. A wave with only standalone agents runs no suite. (Before 1.14 the suite ran once per gated agent -- a wave of six gated agents serially re-ran a slow suite six times for the same diff.)
+
 **Append evidence to the manifest `tdd.tasks` array** (one entry per testable task, keyed by `task_title`): `{task, test_files, red_run, green_run}`. The red_run is filled when the test-author wave runs; green_run when the paired impl wave runs (match by task_title / tests_to_satisfy).
 
-**Invalid red (paired impl skipped):** if the red gate shows the new tests PASSED (exit 0 -- the orchestrator detects this directly) OR the red-gate verifier judged the red invalid (syntax / collection error), do NOT dispatch the paired impl agent -- mark it BLOCKED with reason "paired test red gate invalid" and set `valid_red: false` for that task in the manifest. The verifier still emits the P1 bug from the captured output, which flows to the next cycle.
+**Invalid red (paired impl skipped):** if the red gate shows the new tests PASSED (exit 0 -- the orchestrator detects this directly), do NOT dispatch the paired impl agent -- mark it BLOCKED with reason "paired test red gate invalid" and set `valid_red: false` for that task in the manifest. The red-gate VERIFIER's judgment (syntax / collection error = invalid) may still be in flight when the paired impl dispatches on a pipelined run: when that verdict is already in hand and judged the red invalid, skip the impl the same way; when it is still outstanding, dispatch the impl on the mechanical exit-code evidence rather than stalling the wave -- if the verdict then lands invalid, backfill `valid_red: false`, and the invalid-red P1 bug plus the impl's own green gate and verifier flow the gap into the next cycle. The verifier still emits the P1 bug from the captured output either way.
 
-### 4b. Verify the wave (coverage per `verify_mode`)
+### 4b. Commit the wave
+
+The wave commits BEFORE its verification runs: the commit is mechanical persistence of the dev agents' delivered work, the verdict is reporting -- and the commit SHA is what the pipelined verifier pins its snapshot to. A wave with bugs still commits today (the bugs flow to the fix plan), so committing ahead of the verdict changes what the commit message can say, never what gets committed.
+
+If `git_available` is false, skip this step: set `commit_sha = null` and `skipped_reason = "git not available"` in the wave's manifest entry, print `Wave <W>: git not available -- skipping commit.`, and continue to 4c -- in no-git mode verification runs synchronously against the working tree. Do NOT run any `git` command.
+
+Otherwise (git is available):
+
+Run:
+```bash
+git add -A
+git status --porcelain | head -1   # check if there's anything to commit
+```
+
+If the working tree is clean, do NOT immediately conclude the wave is empty -- first check for rogue self-commits: run `git log --oneline <wave_start_sha>..HEAD`. If commits exist, the wave's work was self-committed by dev agents. Set `commit_sha = $(git rev-parse HEAD)`, `skipped_reason = "self-committed by dev agents (rogue)"`, print a warning listing the rogue commit SHAs, and continue to 4c (do not create an empty commit; the snapshot pins to the rogue HEAD).
+
+If nothing to commit AND no commits since `wave_start_sha` (all dev agents BLOCKED, no files changed):
+- Set `commit_sha = null`, `skipped_reason = "no changes"` in the manifest entry.
+- Print `Wave <W>: nothing to commit.`
+- Continue to 4c -- with no commit there is nothing to snapshot, so this wave's verification runs synchronously against the working tree.
+
+Otherwise:
+```bash
+git commit -m "plan-runner cycle <cycle_n> wave <W>/<total_W>: <task_titles_summary>"
+```
+
+The `<task_titles_summary>` is a comma-joined list of agent task titles, truncated if >80 chars. Example: `"add User model, add Session model, define auth types"`. The commit message carries no verifier verdict -- under pipelined verification the verdict does not exist yet at commit time; it lands in the wave's bug JSON, the manifest, and the PR body instead.
+
+Capture the commit SHA: `commit_sha=$(git rev-parse HEAD)`.
+
+If the commit fails (pre-commit hook):
+```
+Pre-commit hook failed for wave <W>:
+<hook output>
+
+Continue without committing this wave? (Y/n)
+```
+If Y: leave wave uncommitted, continue (subsequent wave commits via `git add -A` will include it). An uncommitted wave has no snapshot to pin, so its verification runs synchronously against the working tree.
+If n: STOP.
+
+After the commit outcome is recorded, run the commit-time half of 4f (run-state checkpoint + wave timing) -- the wave counts as completed at its commit, not at its verdict. Then continue to 4c.
+
+### 4c. Verify the wave (async dispatch, coverage per `verify_mode`)
+
+**Pick up the previous wave's verdict first.** If an earlier wave's verification is still in flight, complete it now, before dispatching this wave's: wait for its verifier(s) (backend-aware -- see "Waiting for verifiers" below) and run the verdict capture for that wave -- bug JSON (4d), dashboard (4e), manifest entry + counters (capture half of 4f). At most one wave's verification is ever in flight, and a pipelined verifier gets the entire next wave's dev + gate + commit time to finish before this pickup blocks on it. If its bounded wait genuinely expires, that wave flows into 4d as `UNVERIFIABLE` per the no-self-verify rule below -- never re-read and judged by the orchestrator.
 
 Print:
 
-    [Wave <W>] All dev agents complete. Verifying (mode: <verify_mode>)...
+    [Wave <W>] Committed. Dispatching verification (mode: <verify_mode>, <pipelined | synchronous>)...
 
 Whether this wave gets a semantic verifier depends on `verify_mode` (resolved in Step 1d-quater):
 - `per-wave` (default): yes -- one verifier for the whole wave.
 - `per-agent`: yes -- one verifier per dev agent.
 - `last-wave-only`: only if this is the final wave (`W == total_W`). For any earlier wave, do NOT dispatch a verifier -- jump to "Unverified wave (SKIPPED)" below.
+
+**Pin the snapshot (pipelined waves).** A pipelined verifier runs while the NEXT wave's dev agents mutate the working tree, so it must read this wave's files as of this wave's commit, never the live tree. When `verify_pipelined` is true AND `git_available` is true AND `commit_sha` is non-null, create a detached snapshot worktree OUTSIDE the repository, in a host temp location:
+
+```bash
+SNAP="$(mktemp -d)/plan-runner-verify-wave-<W>"   # or an equivalent host temp dir
+git worktree add --detach "$SNAP" <commit_sha>
+```
+
+Pass the path as `snapshot_root` in the verifier prompt below (the role resolves every repo-relative path under it and reports paths repo-relative). If `git worktree add` fails, print a note and verify this wave synchronously against the working tree instead. **This wave verifies synchronously** -- no snapshot, verifier reads the working tree, and you wait for the verdict here before moving on -- whenever any of these hold: `verify_pipelined` is false (`--sync-verify` / `verification.pipelined: false`), `git_available` is false, `commit_sha` is null (nothing to commit, or an uncommitted wave), or the snapshot creation failed.
 
 **Dispatch a semantic verifier** after reading `../../agents/plan-verifier.md` relative to this skill. Include the complete role definition in each verifier prompt. Prefer model `sonnet` when available. Build the per-invocation prompt with the `AGENTS IN THIS WAVE` block, varying only by mode:
 - `per-wave`, and the final wave under `last-wave-only`: include ALL dev agents in ONE verifier's `AGENTS IN THIS WAVE` block (the original single-verifier behavior).
@@ -928,6 +998,7 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
     You are being deployed as the wave verifier for plan-runner cycle <cycle_n>, wave <W>.
 
     wave_id: <W>
+    snapshot_root: <absolute snapshot path, or "n/a" (read the working tree)>
 
     AGENTS IN THIS WAVE:
     <for each dev agent in scope for this verifier, repeat the block:>
@@ -954,21 +1025,25 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
 
     Return only the JSON bug report, nothing else.
 
-**Wait for the verifier(s) to complete (backend-aware).** For `per-agent`, wait for ALL N verifiers. The verdict must come from each verifier's own report -- never from the orchestrator's own reading of the code:
+**Do NOT wait (pipelined waves).** On a pipelined wave, dispatch the verifier(s) in the background (subagent backend) or as teammates (teams backend) and proceed straight to the next wave -- the verdict is captured at the next wave's pickup (top of this step) or the end-of-range drain (4g). On a synchronous wave, wait now (rules below) and run the capture -- 4d, 4e, capture half of 4f -- inline before moving on.
 
-**Backend `subagent` (default):** dispatch each verifier as a background task and wait for its completion notification. Collect each return JSON.
+**Waiting for verifiers (backend-aware; applies at every capture point -- pickup, drain, or a synchronous wave).** For `per-agent`, wait for ALL N verifiers. The verdict must come from each verifier's own report -- never from the orchestrator's own reading of the code:
+
+**Backend `subagent` (default):** each verifier runs as a background task; wait for its completion notification. Collect each return JSON.
 
 **Backend `teams`:** each verifier runs as a teammate (or a plain subagent receiving the bundled role definition). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Deterministically poll the verifier's task result / mailbox with a generous bounded wait, re-reading each until the bug-report JSON (its final message) is retrieved. Read the verdict from the task result, not by inferring it.
 
-**No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for a verifier's report, and MUST NOT advance to 4c / 4e / Step 5 / Step 8 until every dispatched verifier's report is in hand. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: the missing verdict flows into 4c as `UNVERIFIABLE` so the gap routes through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
+**No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for a verifier's report, and MUST NOT write a wave's verdict-capture artifacts (4d) from its own reading of the code. Pipelining changes only WHEN a verdict is awaited, never WHETHER: no verdict may remain outstanding past the 4g drain, and Step 5 / Step 8 are unreachable while any dispatched verifier's report is missing. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: the missing verdict flows into 4d as `UNVERIFIABLE` so the gap routes through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
 
-**Unverified wave (SKIPPED).** When `verify_mode` leaves this wave without a semantic verifier (an earlier wave under `last-wave-only`), dispatch no verifier. The orchestrator writes the wave's bug JSON directly in 4c with `verifier_status: "SKIPPED"`, synthesizing only the BLOCKED bugs from dev-reported status:
+**Unverified wave (SKIPPED).** When `verify_mode` leaves this wave without a semantic verifier (an earlier wave under `last-wave-only`), dispatch no verifier and create no snapshot. The orchestrator writes the wave's bug JSON directly in 4d with `verifier_status: "SKIPPED"` -- inline, immediately (there is nothing to pipeline) -- synthesizing only the BLOCKED bugs from dev-reported status:
 - For each dev agent whose declared `dev_status` is `BLOCKED`, synthesize the same P0 `missing_requirement` bug the verifier would (per plan-verifier.md step 1): `title` = `Dev agent BLOCKED: <first concern or 'no reason given'>`, `file` = `<owned_files[0] or 'n/a'>`, `line` = null, `evidence` = "Dev agent could not complete the task", `expected` = "Dev agent should complete all acceptance criteria", `suggested_fix` = `<concerns joined or 'investigate why agent was blocked'>`. This is relayed from the dev's own declared `dev_status`, not a correctness judgment of code -- so it does not violate the No-self-verify rule.
 - Every other agent on a SKIPPED wave gets no bug: its code is deliberately not semantically verified in this mode.
 
-### 4c. Write bug JSON
+### 4d. Write bug JSON (verdict capture)
 
-Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
+4d, 4e, and the capture half of 4f are the **verdict-capture procedures**: they run at whichever point receives the wave's verdict -- the next wave's 4c pickup, the 4g drain, or inline on a synchronous or SKIPPED wave -- exactly once per wave, in this order (4d, then 4e, then 4f's wave entry).
+
+Produce the wave's `bugs/wave-<W>.json` according to how 4c verified it:
 
 **Single-verifier waves (`per-wave`, or the final wave under `last-wave-only`):** parse the verifier's return. If parse fails, synthesize:
 ```json
@@ -979,7 +1054,7 @@ Produce the wave's `bugs/wave-<W>.json` according to how 4b verified it:
 
 **Unverified (SKIPPED) waves:** write
 ```json
-{"wave_id": <W>, "verifier_status": "SKIPPED", "agent_statuses": {"<each agent_id>": "BUGS_FOUND if that agent's dev_status is BLOCKED else SKIPPED"}, "bugs": ["<the BLOCKED bugs synthesized in 4b, may be empty>"]}
+{"wave_id": <W>, "verifier_status": "SKIPPED", "agent_statuses": {"<each agent_id>": "BUGS_FOUND if that agent's dev_status is BLOCKED else SKIPPED"}, "bugs": ["<the BLOCKED bugs synthesized in 4c, may be empty>"]}
 ```
 
 Write the JSON to `$phase_dir/bugs/wave-<W>.json`. (`phase_dir` is `$cycle_dir` for an unphased run and `$cycle_dir/phase-<P>/` for the active phase of a phased run -- see Step 2-bis. The bug JSON keeps the global wave number, so the filename is identical either way.)
@@ -988,7 +1063,11 @@ Capture each dispatched verifier's token usage (see **Token accounting**). Each 
 
 **Tear down the wave verifier(s).** Each dispatched verifier's report is now captured -- release it with the host-native stop facility if it remains resident, or stop its teammate agent ID/name on the teams backend. For a `per-agent` wave, tear down every verifier. A SKIPPED wave has no verifier to tear down. Do this regardless of `verifier_status` (`CLEAN`, `BUGS_FOUND`, `UNVERIFIABLE`, or `SKIPPED`).
 
-### 4d. Render wave dashboard
+**Remove the wave's snapshot worktree** (pipelined waves): `git worktree remove --force "$SNAP"`; if removal fails, run `git worktree prune` and continue -- never fail the pipeline over snapshot cleanup. A synchronous or SKIPPED wave has no snapshot.
+
+### 4e. Render wave dashboard (verdict capture)
+
+On a pipelined wave this dashboard prints at verdict capture -- typically while the NEXT wave's dev agents are already running. It is labeled by wave id, so the one-wave offset is harmless; a synchronous or SKIPPED wave prints it immediately.
 
 Print a wave summary table. The "Verify" and "Bugs" columns reflect the single wave verifier result (the verifier_status and total bugs across all agents):
 
@@ -1010,52 +1089,16 @@ Wave tokens: <wave_token_total or "n/a"> (<reported>/<dispatched> agents reporte
 
 For a SKIPPED wave (unverified under `verify_mode`), the "Wave verifier" line prints `SKIPPED` and "Total bugs" counts only any BLOCKED-derived bugs. For a `per-agent` wave, "Wave verifier" prints the merged wave `verifier_status` and each agent's own verdict appears in the "Status per agent" column.
 
-### 4e. Commit the wave
+### 4f. Update manifest and run-state (two timing points)
 
-If `git_available` is false, skip this step: set `commit_sha = null` and `skipped_reason = "git not available"` in the manifest entry, print `Wave <W>: git not available -- skipping commit.`, and continue to the next wave. Do NOT run any `git` command.
+4f fires at two distinct moments per wave.
 
-Otherwise (git is available):
+**Commit-time half (immediately after 4b, before 4c dispatches verification):**
 
-Compute verifier-status summary for the commit message:
-- If all verifiers returned CLEAN: `"verified clean"`
-- If any verifier returned BUGS_FOUND: `"<total_bugs> bugs flagged"`
-- If any verifier returned UNVERIFIABLE: append `"<N> unverifiable"`
+- Record `t_wave_<W>_end = $(date +%s)`. `duration_seconds` measures dispatch through commit; a pipelined wave's verification time deliberately overlaps the next wave's execution and is not part of any single wave's duration.
+- **Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 5.2). This per-wave write is what makes crash recovery granular to the wave, with or without git. The wave counts as completed at its commit -- a verdict still in flight does not hold up the checkpoint; if the run dies before that verdict is captured, the Step 5.0 coverage gate backfills it as UNVERIFIABLE.
 
-Run:
-```bash
-git add -A
-git status --porcelain | head -1   # check if there's anything to commit
-```
-
-If the working tree is clean, do NOT immediately conclude the wave is empty -- first check for rogue self-commits: run `git log --oneline <wave_start_sha>..HEAD`. If commits exist, the wave's work was self-committed by dev agents. Set `commit_sha = $(git rev-parse HEAD)`, `skipped_reason = "self-committed by dev agents (rogue)"`, print a warning listing the rogue commit SHAs, and continue to the next wave (do not create an empty commit).
-
-If nothing to commit AND no commits since `wave_start_sha` (all dev agents BLOCKED, no files changed):
-- Set `commit_sha = null`, `skipped_reason = "no changes"` in manifest entry.
-- Print `Wave <W>: nothing to commit.`
-- Continue to next wave.
-
-Otherwise:
-```bash
-git commit -m "plan-runner cycle <cycle_n> wave <W>/<total_W>: <task_titles_summary> (<verifier_summary>)"
-```
-
-The `<task_titles_summary>` is a comma-joined list of agent task titles, truncated if >80 chars. Example: `"add User model, add Session model, define auth types"`.
-
-Capture the commit SHA: `commit_sha=$(git rev-parse HEAD)`.
-
-If the commit fails (pre-commit hook):
-```
-Pre-commit hook failed for wave <W>:
-<hook output>
-
-Continue without committing this wave? (Y/n)
-```
-If Y: leave wave uncommitted, continue (subsequent wave commits via `git add -A` will include it).
-If n: STOP.
-
-### 4f. Update manifest
-
-Append a wave entry to `$phase_dir/manifest.json` (`$cycle_dir/manifest.json` for an unphased run; the active phase's `$cycle_dir/phase-<P>/manifest.json` for a phased run):
+**Capture half (at verdict capture, after 4d and 4e):** append the wave entry to `$phase_dir/manifest.json` (`$cycle_dir/manifest.json` for an unphased run; the active phase's `$cycle_dir/phase-<P>/manifest.json` for a phased run):
 
 ```json
 {
@@ -1077,11 +1120,11 @@ The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the to
 
 Use Read+Write or jq to update the manifest in place. If jq is unavailable, read the JSON, mutate it in memory, write it back.
 
-**Update the run-state checkpoint (phased runs only).** If `phasing_active` is true, rewrite `$cycle_dir/run-state.json` now (per the Run-state lifecycle in Step 2-bis): set the active phase's `last_completed_wave` to this global wave number `<W>`, its `status` to `in_progress`, and `updated_at` to the current ISO timestamp. When `<W>` is the last wave of the active phase, this is a phase boundary: set that phase's `status` to `complete` and the next phase's `status` to `in_progress` (leave `overall_status` `active` until the terminal phase finalizes in Step 5.2). This per-wave write is what makes crash recovery granular to the wave, with or without git.
+Move to the next wave -- its 4a dispatch runs while this wave's pipelined verifier is still working. After the last wave of the range completes 4c and its commit-time 4f, run the 4g drain below. Then: on an unphased run, proceed to Step 5. Inside a phase (`phasing_active` is true), control returns to Step 3-bis at the phase boundary instead -- a relay phase-runner returns its phase-summary JSON (Step 3-bis.0), and a stop-mode session ends or, on the terminal phase, proceeds to Step 5 (Step 3-bis.3). Step 5 runs only once, on the terminal phase.
 
-Record `t_wave_<W>_end = $(date +%s)`.
+### 4g. Drain outstanding verdicts (end of the wave range)
 
-Move to the next wave. After the last wave of the range completes: on an unphased run, proceed to Step 5. Inside a phase (`phasing_active` is true), control returns to Step 3-bis at the phase boundary instead -- a relay phase-runner returns its phase-summary JSON (Step 3-bis.0), and a stop-mode session ends or, on the terminal phase, proceeds to Step 5 (Step 3-bis.3). Step 5 runs only once, on the terminal phase.
+After the range's last wave, one wave's verification is normally still in flight (the final wave's). Before leaving Step 4 -- before a phase boundary (Step 3-bis.0's phase-summary return, Step 3-bis.3's stop boundary) and before Step 5 -- wait for EVERY outstanding verifier (backend-aware, bounded, per 4c's waiting rules) and run the verdict capture (4d, 4e, capture half of 4f) for each, then remove any remaining snapshot worktrees. A verifier whose bounded wait expires flows into 4d as `UNVERIFIABLE`, exactly per the no-self-verify rule. The wave range is complete only when no verdict is outstanding, so every phase manifest and phase-summary return carries a full set of verdicts and verifier tokens; the Step 5.0 coverage gate remains the terminal backstop for anything a crash still slipped through.
 
 ## Step 5: AGGREGATE
 
@@ -1102,6 +1145,8 @@ If any wave's bug JSON is missing or has a null `verifier_status`, the verifier 
 ```json
 {"wave_id": <W>, "verifier_status": "UNVERIFIABLE", "agent_statuses": {}, "bugs": [{"bug_id": "wave-<W>-bug-1", "severity": "P2", "category": "incorrect_implementation", "title": "Wave <W> verifier verdict missing -- wave closed without verification", "file": "n/a", "line": null, "evidence": "No bugs/wave-<W>.json with a verifier_status was found at aggregation time.", "expected": "Every wave is gated by its verifier before the cycle closes", "suggested_fix": "Re-run this cycle's wave <W> so the verifier produces a verdict"}]}
 ```
+
+If a backfilled wave also lacks its manifest wave entry (its verdict was in flight when a crash killed the session, so the capture half of 4f never ran), append a minimal entry to that wave's phase manifest -- `wave_id`, `wave_verifier_status: "UNVERIFIABLE"`, `wave_bug_count: 1`, and null for anything unknown -- so the cross-phase stats (5.2) stay coherent.
 
 Print a warning naming each backfilled wave (and its phase). This gate makes it structurally impossible to reach the PR step (Step 8, downstream of Step 5 on both the clean and buggy paths) while a verifier verdict for any wave of any phase is still outstanding. It remains upstream of the PR step on every path across phases: the terminal phase runs it before Step 7-bis / Step 8 can execute, and no intermediate phase reaches those steps at all.
 
@@ -1246,7 +1291,7 @@ Update manifest `completed_at` and write to disk. Proceed to Step 7-bis.
 ## Step 7-bis: SYNC CODE ATLAS
 
 This step keeps a code-atlas architecture index in sync with what this cycle just
-implemented. All wave changes are already committed to disk (Step 4e), so the atlas
+implemented. All wave changes are already committed to disk (Step 4b), so the atlas
 update picks them up automatically. It runs on the **terminal phase of the terminal
 cycle only** -- the Step 6 "Y" re-run handoff never reaches this step, so intermediate
 fix cycles do not re-index; and on a phased run only the terminal phase's session

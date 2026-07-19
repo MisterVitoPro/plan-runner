@@ -149,7 +149,7 @@ test("docs + version reflect the TDD feature", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "1.13.0", "plugin version is current");
+  assert.equal(claude.version, "1.14.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   const readme = read("README.md");
@@ -178,7 +178,7 @@ test("SKILL releases dev agents and wave verifiers after every wave", () => {
   assert.match(f, /every wave, not only the last one/i, "teardown must run wave by wave, not deferred to the end of the cycle");
   // the teardown step must precede the next dispatch point (verifier dispatch)
   assert.ok(
-    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4b. Verify the wave"),
+    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4c. Verify the wave"),
     "dev-agent teardown must happen before the wave verifier is dispatched"
   );
 });
@@ -468,7 +468,7 @@ test("skills use Codex-compatible frontmatter and portable invocations", () => {
 
 test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {
   const f = read("skills/run/SKILL.md");
-  assert.match(f, /verify_mode/, "Step 4b branches on verify_mode");
+  assert.match(f, /verify_mode/, "Step 4c branches on verify_mode");
   assert.match(f, /one verifier per dev agent/i, "per-agent = one verifier per dev agent");
   assert.match(f, /last-wave-only[\s\S]{0,260}(final wave|last wave)/i, "last-wave-only verifies only the final wave");
   assert.match(f, /"verifier_status":\s*"SKIPPED"/, "unverified waves are written SKIPPED");
@@ -737,6 +737,46 @@ test("stale (Step 7) cross-phase summation references were corrected to (Step 5.
   assert.match(f, /terminal-phase reporting \(Step 5\.2\) sums across the per-phase manifests/, "Step 2-bis ref points at Step 5.2");
   // no summation cross-ref still points at Step 7
   assert.doesNotMatch(f, /per-phase manifests \(Step 7\)|\(Step 7\) sums across the per-phase manifests/, "no stale (Step 7) summation ref remains");
+});
+
+test("verification is pipelined: commit precedes verifier dispatch, verdicts drain before aggregation", () => {
+  const f = read("skills/run/SKILL.md");
+  // the commit step now precedes the verification step in the wave flow
+  assert.ok(
+    f.indexOf("### 4b. Commit the wave") < f.indexOf("### 4c. Verify the wave"),
+    "wave commit must come before verifier dispatch"
+  );
+  // pipelined verifiers read a snapshot pinned to the wave commit, never the live tree
+  assert.match(f, /git worktree add --detach[^\n]*<commit_sha>/, "snapshot worktree is pinned to the wave commit SHA");
+  assert.match(f, /snapshot_root/, "verifier prompt carries the snapshot root");
+  // dispatch does not block the next wave
+  assert.match(f, /\*\*Do NOT wait \(pipelined waves\)\.\*\*/, "pipelined dispatch does not wait for the verdict");
+  assert.match(f, /At most one wave's verification is ever in flight/i, "in-flight verification is bounded to one wave");
+  // every verdict drains before aggregation / phase boundaries
+  assert.match(f, /### 4g\. Drain outstanding verdicts/, "defines the end-of-range drain");
+  assert.ok(
+    f.indexOf("### 4g. Drain outstanding verdicts") < f.indexOf("## Step 5: AGGREGATE"),
+    "the drain precedes aggregation"
+  );
+  // kill-switch: flag + yml key, and no-git always synchronous
+  assert.match(f, /--sync-verify/, "documents the --sync-verify kill-switch");
+  assert.match(f, /verification\.pipelined/, "documents the verification.pipelined yml key");
+  assert.match(f, /no-git run always verifies synchronously/i, "no-git mode falls back to synchronous verification");
+  // README documents it
+  const readme = read("README.md");
+  assert.match(readme, /--sync-verify/, "README documents --sync-verify");
+  assert.match(readme, /pipelined/i, "README describes pipelined verification");
+});
+
+test("TDD gates run the full suite once per wave, targeted tests per agent", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /Shared full-suite run \(once per wave, not per agent\)/, "one full-suite run per wave");
+  assert.match(f, /WAVE SUITE REGRESSIONS/, "the shared regression block is labeled");
+  assert.match(f, /only standalone agents runs no suite/i, "standalone-only waves skip the suite");
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /WAVE SUITE REGRESSIONS/, "verifier understands the shared regression block");
+  assert.match(verifier, /snapshot_root/, "verifier resolves paths under the snapshot root");
+  assert.match(verifier, /repo-relative/, "verifier reports repo-relative paths from the snapshot");
 });
 
 test("resume scan keeps only active run-states (no dead 'interrupted' filter)", () => {

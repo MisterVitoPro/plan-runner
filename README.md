@@ -10,7 +10,7 @@ Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pip
 
 1. **Analyze.** A `plan-analyzer` agent reads your plan and buckets tasks into waves of file-disjoint work (max 6 agents per wave, ordered as a DAG).
 2. **Confirm.** You see the wave plan and approve before any dev work runs.
-3. **Execute per wave.** For each wave: dispatch up to 6 dev agents in parallel (TDD runs use `plan-test-author` for test-author roles and `plan-dev` for impl/standalone roles), then dispatch one `plan-verifier` for the wave, then commit the wave with verifier status in the message.
+3. **Execute per wave.** For each wave: dispatch up to 6 dev agents in parallel (TDD runs use `plan-test-author` for test-author roles and `plan-dev` for impl/standalone roles), run the TDD gates (one shared full-suite run per wave), commit the wave, then dispatch one `plan-verifier` against a snapshot of that commit -- the verifier runs while the next wave's dev agents work, so verification stays off the critical path between waves.
 4. **Aggregate.** A `plan-aggregator` agent collects every verifier-flagged bug, deduplicates, ranks by severity (P0-P3), and writes both a `bugs.md` audit and a `fix-plan.md` (a new plan ready for re-runs).
 5. **Re-run prompt.** You decide whether to auto-handoff to a fresh-context subagent that runs the generated `fix-plan.md` for cycle 2.
 
@@ -54,8 +54,10 @@ Teams** orchestration and uses it when available:
   self-claim each wave's tasks from a shared task list and report via the team
   mailbox, so the lead's context stays lean instead of accumulating every agent's
   full JSON return.
-- **Same safety contract.** The per-wave barrier is unchanged: dispatch a wave ->
-  wait for all -> run TDD gates -> verify -> commit -> next wave. File-disjoint
+- **Same safety contract.** The per-wave dev barrier is unchanged: dispatch a
+  wave -> wait for all -> run TDD gates -> commit -> next wave, with the wave's
+  verifier dispatched right after the commit and its verdict captured while the
+  next wave runs (pipelined). File-disjoint
   waves (already produced by the analyzer) satisfy the Agent Teams "each teammate
   owns different files" requirement.
 - **Verifier-gated waves.** Because the team task status lags, the lead waits on
@@ -142,6 +144,8 @@ points you to `--no-tdd`.
   single-file runs (e.g. `pytest {file}`).
 - `--verify <mode>` -- verification coverage: `per-agent`, `per-wave` (default), or
   `last-wave-only`. Overrides `.plan-runner.yml`.
+- `--sync-verify` -- disable pipelined verification and wait for each wave's verdict
+  before the next wave starts (the pre-1.14 behavior). Overrides `.plan-runner.yml`.
 - `--phase-size <N>` -- override `phasing.max_waves_per_phase` for this run. See
   "Phasing large plans" below.
 - `--phase-mode <relay|stop>` -- override `phasing.mode` for this run.
@@ -165,10 +169,22 @@ Set it persistently in a committed `.plan-runner.yml` at the repo root:
 ```yaml
 verification:
   mode: per-wave   # per-agent | per-wave | last-wave-only
+  pipelined: true  # default true; false = wait for each verdict before the next wave
 ```
 
 or per-run with `--verify <mode>` (which overrides the file). Precedence:
 `--verify` flag > `.plan-runner.yml` > default (`per-wave`).
+
+**Pipelined verification (default since 1.14).** The verifier no longer sits
+between waves: each wave is committed first, then its verifier is dispatched
+against a read-only snapshot worktree pinned to that commit and runs while the
+next wave's dev agents work. Every verdict still lands before aggregation -- an
+end-of-range drain waits for stragglers, and the coverage gate backfills
+`UNVERIFIABLE` for anything that never landed -- so the honesty guarantees are
+unchanged; only the waiting moved. Runs without git, waves with nothing to
+commit, and `--sync-verify` / `pipelined: false` runs verify synchronously as
+before. TDD gates also got cheaper: the full suite runs once per wave for the
+regression diff instead of once per gated agent.
 
 `SKIPPED` is an intentional, transparent absence -- distinct from `UNVERIFIABLE`
 (a *requested* verdict that never landed, still routed through the fix-plan loop).
