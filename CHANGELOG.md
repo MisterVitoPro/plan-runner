@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.15.1 - 2026-07-23
+
+- **Marketplace description brought up to date.** The `description` in `.claude-plugin/plugin.json` -- which `marketplace-pin.yml` copies verbatim into the Claude catalog entry, and which is the only plugin copy users read when browsing the marketplace -- had drifted two releases behind: it never picked up large-plan phasing (1.13.0) or auto-detected output location (1.15.0). Both are now described. No behavior change; the version bump exists solely because the pin workflow only syncs the description on a version change.
+
 ## 1.15.0 - 2026-07-23
 
 - **Auto-detected output location.** Cycle artifacts now go under `<docs_base>/plan-runner/` instead of a hardcoded `docs/plan-runner/`. A new pre-flight step (Step 1a-minus, ahead of the resumable-run auto-detect, which consumes the resolved base) resolves `<docs_base>` in three tiers: (1) an explicit prose statement naming a documentation directory in the repo-root `CLAUDE.md`, then the repo-root `AGENTS.md`, then in-context repository instructions -- a vague mention of "docs" with no named directory does not count; (2) otherwise a repo-root top-level scan for a directory named literally `docs`, `doc`, `documentation`, or `.docs`, first match in that fixed order; (3) otherwise the default `docs`, which is byte-for-byte the pre-1.15.0 behavior. There is no settings key -- nothing to configure. The resolved base and its source are printed once at run start (`Output location: <docs_base>/plan-runner/ (from <CLAUDE.md | AGENTS.md | top-level scan | default>).`) and recorded as `docs_base` in the cycle manifest; manifests written before 1.15.0 omit the field and always meant `docs`. When the resolved base differs from `docs`, resume discovery globs run-states under both `<docs_base>/plan-runner/` and the legacy `docs/plan-runner/`.
