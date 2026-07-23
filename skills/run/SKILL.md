@@ -152,7 +152,11 @@ Every other invocation -- a fresh run and an explicit `--resume` alike -- resolv
 2. **Top-level scan.** Otherwise, list the repo-root top-level entries (Glob or a directory listing) and check, in this fixed order, for a directory literally named `docs`, `doc`, `documentation`, `.docs`. Set `docs_base` to the first one that exists and `docs_base_source = "top-level scan"`. If two or more of these directories exist simultaneously, still pick only the first match in this order -- never create or use a second base.
 3. **Default.** Otherwise (no explicit statement, no known-name top-level directory), set `docs_base = "docs"` and `docs_base_source = "default"` -- byte-for-byte today's behavior, including creating `docs/` as Step 1b already does.
 
-Store `docs_base` and `docs_base_source` for Step 1b (`cycle_root`), the resume-discovery globs (1a-0 and R.1), Step 1e (manifest), and the printed line below.
+Store `docs_base` and `docs_base_source` for Step 1b (`cycle_root`), the resume-discovery globs (1a-0 and R.1), and Step 1e (manifest).
+
+Print the resolved output base and its source now, unconditionally, as soon as `docs_base` resolves -- before the `resume_flag` check below, so both a fresh run and an explicit `--resume` invocation see it:
+
+    Output location: <docs_base>/plan-runner/ (from <CLAUDE.md | AGENTS.md | top-level scan | default>).
 
 If `resume_flag` is true, this is an explicit resume invocation: skip the rest of this fresh pre-flight and Steps 2 / 2-bis / 3 (the wave plan is already sliced and checkpointed on disk) and execute the **Resume and crash recovery** section directly (entry: explicit `--resume`), which consumes `docs_base` resolved above for its bare-scan glob (R.1).
 
@@ -378,11 +382,7 @@ When `phasing_enabled` is false, print instead:
 
 Store `phasing_enabled`, `max_waves_per_phase`, `phase_mode`, `auto_stop_phases`, and `relay_max_minutes` for Step 2-bis (slicing) and for the run-state checkpoint.
 
-Print the resolved output base and its source, in the same config block as the verification-mode and phasing lines above:
-
-    Output location: <docs_base>/plan-runner/ (from <CLAUDE.md | AGENTS.md | top-level scan | default>).
-
-(`docs_base` and `docs_base_source` were resolved in 1a-minus, ahead of the resumable-run auto-detect; this line only prints here, on the fresh-pre-flight path, mirroring the verify-mode / phasing lines it sits beside -- an explicit `--resume` invocation skips this whole block and never reprints it.)
+(The output base and its source were already printed in Step 1a-minus, immediately after `docs_base` resolved and unconditionally of everything that follows it -- including the clean-tree prompt, missing test command, and verify-mode validation checks that can each STOP the pipeline before this step is reached. Nothing further to print here.)
 
 ### 1e. Initialize manifest
 
@@ -739,7 +739,7 @@ Resolve `run_state_path`:
 
 - **Explicit path** (`resume_path` is set): use it directly as `run_state_path`.
 - **Bare `--resume`** (`resume_flag` true, `resume_path` unset) **or the Step 1a-0 auto-detect scan**: scan for resumable run-states:
-  1. Find every `run-state.json` under `<docs_base>/plan-runner/` (Glob `<docs_base>/plan-runner/**/run-state.json`), using `docs_base` resolved in 1a-minus. If `docs_base` differs from `docs`, ALSO glob the legacy `docs/plan-runner/**/run-state.json` and union the two result sets, de-duplicating any path that appears in both (this only happens when `docs_base` itself resolves to `docs`, in which case the second glob is redundant and contributes nothing new). This keeps runs started before a repo adopted a different `docs_base` -- or runs from a repo whose base legitimately is `docs` -- discoverable either way.
+  1. Find every `run-state.json` under `<docs_base>/plan-runner/` (Glob `<docs_base>/plan-runner/**/run-state.json`), using `docs_base` resolved in 1a-minus. If `docs_base` differs from `docs`, ALSO glob the legacy `docs/plan-runner/**/run-state.json` and union the two result sets, de-duplicating any path that appears in both (the two glob roots always differ inside this branch, since it only runs when `docs_base` differs from `docs`; a collision is not expected but the de-dup guards against aliasing -- e.g. a symlink or a case-insensitive filesystem -- without weakening the union). This keeps runs started before a repo adopted a different `docs_base` -- or runs from a repo whose base legitimately is `docs` -- discoverable either way.
   2. Read each. Keep those that parse AND whose `overall_status` is `active` AND that have at least one phase whose `status` is not `complete`. Skip every `complete` or `abandoned` run-state -- **abandoned run-states are never re-offered or resumed.** (`active` is the only resumable status: every write site sets `active`, `complete`, or `abandoned`, so an interrupted-but-resumable run is `active` with an incomplete phase.)
   3. If none qualify: for a **bare `--resume`**, print `No resumable run found under <docs_base>/plan-runner/.` (or, when the legacy path was also scanned, `No resumable run found under <docs_base>/plan-runner/ or docs/plan-runner/.`) and STOP (the user asked to resume; do not silently start fresh). For the **Step 1a-0 auto-detect**, return to Step 1a and continue the fresh run silently.
   4. Otherwise pick the most recent by `updated_at` as the candidate (note in the offer if others also exist). For a **bare `--resume`**, set `run_state_path` to the candidate and continue to R.2. For the **Step 1a-0 auto-detect**, print the offer:
