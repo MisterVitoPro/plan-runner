@@ -31,7 +31,7 @@ Tokenize the skill invocation input on whitespace. The first non-flag token is t
 - `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
 - `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
 - `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
-- `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under `docs/plan-runner/`. A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
+- `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under the resolved `docs_base`'s `plan-runner/` tree (plus the legacy `docs/plan-runner/` when `docs_base` differs from `docs`; see R.1). A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
 
 Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Set `sync_verify_flag = true` if `--sync-verify` is present, otherwise `sync_verify_flag = false`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--sync-verify`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
 
@@ -142,15 +142,25 @@ Phase <P>/<phase_count> complete -- waves <lo>-<hi> (<n> waves)
 
 ## Step 1: PRE-FLIGHT
 
-If `is_phase_runner` is true, this invocation is a relay phase-runner: skip Steps 1, 2, 2-bis, and 3 entirely (all state is already on disk from the driver's slicing) and execute Step 3-bis.0 directly.
+If `is_phase_runner` is true, this invocation is a relay phase-runner: skip Steps 1, 2, 2-bis, and 3 entirely (all state is already on disk from the driver's slicing) and execute Step 3-bis.0 directly. A phase runner never resolves `docs_base` itself -- `cycle_dir` is derived from `run_state_path`'s parent directory (Step 3-bis.0), which already lives under whatever base the original run resolved.
 
-If `resume_flag` is true, this is an explicit resume invocation: skip this fresh pre-flight and Steps 2 / 2-bis / 3 (the wave plan is already sliced and checkpointed on disk) and execute the **Resume and crash recovery** section directly (entry: explicit `--resume`).
+### 1a-minus. Resolve output base
+
+Every other invocation -- a fresh run and an explicit `--resume` alike -- resolves `docs_base` here, before any resume discovery or plan validation runs, because both the Step 1a-0 auto-detect scan and the bare-`--resume` scan (R.1) glob under `docs_base`. Resolve using only directory listing / Glob and reading `CLAUDE.md` / `AGENTS.md` -- no YAML parser, no shell-specific tooling -- so the result is deterministic for a given repository state:
+
+1. **Explicit statement.** Check, in order, the repo-root `CLAUDE.md`, the repo-root `AGENTS.md`, and any repository instructions already loaded into context this session (e.g. a project `CLAUDE.md` the host injected at session start). Look for a sentence that **explicitly** names a documentation directory (e.g. "docs live in `documentation/`", "project docs are under `doc/`"). A generic or vague mention of "docs" without a named directory does not count -- fall through to the next rule. If an explicit statement is found, set `docs_base` to the named directory (strip any trailing slash) and `docs_base_source` to whichever file supplied it (`CLAUDE.md` takes precedence over `AGENTS.md` when both name a directory; in-context repository instructions count as their source file, typically `CLAUDE.md`).
+2. **Top-level scan.** Otherwise, list the repo-root top-level entries (Glob or a directory listing) and check, in this fixed order, for a directory literally named `docs`, `doc`, `documentation`, `.docs`. Set `docs_base` to the first one that exists and `docs_base_source = "top-level scan"`. If two or more of these directories exist simultaneously, still pick only the first match in this order -- never create or use a second base.
+3. **Default.** Otherwise (no explicit statement, no known-name top-level directory), set `docs_base = "docs"` and `docs_base_source = "default"` -- byte-for-byte today's behavior, including creating `docs/` as Step 1b already does.
+
+Store `docs_base` and `docs_base_source` for Step 1b (`cycle_root`), the resume-discovery globs (1a-0 and R.1), Step 1e (manifest), and the printed line below.
+
+If `resume_flag` is true, this is an explicit resume invocation: skip the rest of this fresh pre-flight and Steps 2 / 2-bis / 3 (the wave plan is already sliced and checkpointed on disk) and execute the **Resume and crash recovery** section directly (entry: explicit `--resume`), which consumes `docs_base` resolved above for its bare-scan glob (R.1).
 
 Record the pipeline start time: `t_start = $(date +%s)`.
 
 ### 1a-0. Auto-detect resumable runs
 
-On a normal fresh run only (`is_phase_runner` false AND `resume_flag` false), run the auto-detect scan in **Resume and crash recovery** step R.1 before validating the plan: it looks for an incomplete run-state under `docs/plan-runner/` and, if it finds one, offers to resume it. If the user accepts, control transfers to the resume machinery and this fresh pre-flight does not continue. If the user declines (the incomplete run-state is marked `abandoned`) or none is found, continue with 1a below as a fresh run.
+On a normal fresh run only (`is_phase_runner` false AND `resume_flag` false), run the auto-detect scan in **Resume and crash recovery** step R.1 before validating the plan: using the `docs_base` resolved in 1a-minus, it looks for an incomplete run-state under `<docs_base>/plan-runner/` (plus the legacy `docs/plan-runner/` whenever `docs_base` differs from `docs`, per R.1) and, if it finds one, offers to resume it. If the user accepts, control transfers to the resume machinery and this fresh pre-flight does not continue. If the user declines (the incomplete run-state is marked `abandoned`) or none is found, continue with 1a below as a fresh run.
 
 ### 1a. Validate plan file
 
@@ -184,7 +194,7 @@ TDD is auto-enabled. Do NOT prompt the user.
 ### 1b. Compute cycle directory
 
 1. Compute `DATE=$(date +%Y-%m-%d)`.
-2. Set `cycle_root = "docs/plan-runner/$DATE/"`.
+2. Set `cycle_root = "<docs_base>/plan-runner/$DATE/"`, using `docs_base` resolved in 1a-minus.
 3. If `cycle_root` does not exist, set `cycle_n = 1`.
 4. Otherwise, list existing `cycle-*` directories under `cycle_root` and set `cycle_n = max(N) + 1`. Use Glob to find them.
 5. Set `cycle_dir = "$cycle_root/cycle-$cycle_n/"`.
@@ -368,6 +378,12 @@ When `phasing_enabled` is false, print instead:
 
 Store `phasing_enabled`, `max_waves_per_phase`, `phase_mode`, `auto_stop_phases`, and `relay_max_minutes` for Step 2-bis (slicing) and for the run-state checkpoint.
 
+Print the resolved output base and its source, in the same config block as the verification-mode and phasing lines above:
+
+    Output location: <docs_base>/plan-runner/ (from <CLAUDE.md | AGENTS.md | top-level scan | default>).
+
+(`docs_base` and `docs_base_source` were resolved in 1a-minus, ahead of the resumable-run auto-detect; this line only prints here, on the fresh-pre-flight path, mirroring the verify-mode / phasing lines it sits beside -- an explicit `--resume` invocation skips this whole block and never reprints it.)
+
 ### 1e. Initialize manifest
 
 Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
@@ -381,6 +397,7 @@ Write a starter `manifest.json` to `$cycle_dir/manifest.json`:
   "context7_available": <bool>,
   "git_available": <bool>,
   "backend": "<backend>",
+  "docs_base": "<docs_base>",
   "verification": {"mode": "<verify_mode>", "waves_total": null, "waves_verified": 0, "waves_skipped": 0},
   "waves": [],
   "total_bugs": 0,
@@ -722,9 +739,9 @@ Resolve `run_state_path`:
 
 - **Explicit path** (`resume_path` is set): use it directly as `run_state_path`.
 - **Bare `--resume`** (`resume_flag` true, `resume_path` unset) **or the Step 1a-0 auto-detect scan**: scan for resumable run-states:
-  1. Find every `run-state.json` under `docs/plan-runner/` (Glob `docs/plan-runner/**/run-state.json`).
+  1. Find every `run-state.json` under `<docs_base>/plan-runner/` (Glob `<docs_base>/plan-runner/**/run-state.json`), using `docs_base` resolved in 1a-minus. If `docs_base` differs from `docs`, ALSO glob the legacy `docs/plan-runner/**/run-state.json` and union the two result sets, de-duplicating any path that appears in both (this only happens when `docs_base` itself resolves to `docs`, in which case the second glob is redundant and contributes nothing new). This keeps runs started before a repo adopted a different `docs_base` -- or runs from a repo whose base legitimately is `docs` -- discoverable either way.
   2. Read each. Keep those that parse AND whose `overall_status` is `active` AND that have at least one phase whose `status` is not `complete`. Skip every `complete` or `abandoned` run-state -- **abandoned run-states are never re-offered or resumed.** (`active` is the only resumable status: every write site sets `active`, `complete`, or `abandoned`, so an interrupted-but-resumable run is `active` with an incomplete phase.)
-  3. If none qualify: for a **bare `--resume`**, print `No resumable run found under docs/plan-runner/.` and STOP (the user asked to resume; do not silently start fresh). For the **Step 1a-0 auto-detect**, return to Step 1a and continue the fresh run silently.
+  3. If none qualify: for a **bare `--resume`**, print `No resumable run found under <docs_base>/plan-runner/.` (or, when the legacy path was also scanned, `No resumable run found under <docs_base>/plan-runner/ or docs/plan-runner/.`) and STOP (the user asked to resume; do not silently start fresh). For the **Step 1a-0 auto-detect**, return to Step 1a and continue the fresh run silently.
   4. Otherwise pick the most recent by `updated_at` as the candidate (note in the offer if others also exist). For a **bare `--resume`**, set `run_state_path` to the candidate and continue to R.2. For the **Step 1a-0 auto-detect**, print the offer:
 
 ```
