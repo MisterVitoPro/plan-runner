@@ -149,12 +149,71 @@ test("docs + version reflect the TDD feature", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "1.14.0", "plugin version is current");
+  assert.equal(claude.version, "1.15.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
+});
+
+test("SKILL pins the three-tier output-base resolution ahead of Step 1a-0", () => {
+  const f = read("skills/run/SKILL.md");
+  // tier 1: an explicit CLAUDE.md / AGENTS.md / in-context statement
+  assert.match(
+    f,
+    /CLAUDE\.md[\s\S]{0,60}AGENTS\.md[\s\S]{0,120}(context|session)/i,
+    "tier 1 checks CLAUDE.md, then AGENTS.md, then in-context repository instructions"
+  );
+  // tier 2: top-level scan for a known docs-directory name, in this fixed order
+  assert.match(
+    f,
+    /`docs`,\s*`doc`,\s*`documentation`,\s*`\.docs`/,
+    "tier 2 top-level scan checks docs, doc, documentation, .docs in that fixed order"
+  );
+  // tier 3: default fallback to docs/
+  assert.match(f, /docs_base\s*=\s*"docs"/, "tier 3 defaults docs_base to \"docs\"");
+  // ordering: the resolution step must run before the Step 1a-0 auto-detect scan
+  const resolveIdx = f.indexOf("1a-minus");
+  const autoDetectIdx = f.indexOf("1a-0");
+  assert.ok(resolveIdx >= 0, "must have a 1a-minus resolve-base step");
+  assert.ok(autoDetectIdx >= 0, "must have a 1a-0 auto-detect step");
+  assert.ok(resolveIdx < autoDetectIdx, "base resolution (1a-minus) must precede the 1a-0 auto-detect scan");
+});
+
+test("SKILL pins the dual-base resume glob and the printed Output location line", () => {
+  const f = read("skills/run/SKILL.md");
+  // resolved base glob
+  assert.match(
+    f,
+    /<docs_base>\/plan-runner\/\*\*\/run-state\.json/,
+    "resume scan globs run-state.json under the resolved docs_base"
+  );
+  // legacy fallback glob, only when docs_base differs from the default
+  assert.match(
+    f,
+    /docs_base.{0,20}differs from `?docs`?[\s\S]{0,120}legacy `?docs\/plan-runner\/`?/i,
+    "resume scan also globs the legacy docs/plan-runner/ base when docs_base differs from docs"
+  );
+  assert.match(
+    f,
+    /docs\/plan-runner\/\*\*\/run-state\.json/,
+    "legacy glob targets docs/plan-runner/**/run-state.json"
+  );
+  // printed output-location line
+  assert.match(
+    f,
+    /Output location:\s*<docs_base>\/plan-runner\//,
+    "must print the resolved Output location line"
+  );
+});
+
+test("hooks.json pins the base-agnostic **/plan-runner/ gitignore entry", () => {
+  const hooks = JSON.parse(read("hooks/hooks.json"));
+  const cmd = hooks.hooks.SessionStart[0].hooks[0].command;
+  assert.match(cmd, /\*\*\/plan-runner\//, "hook writes the **/plan-runner/ gitignore entry");
+  const description = hooks.description || "";
+  assert.match(description, /\*\*\/plan-runner\//, "hook description also names **/plan-runner/");
 });
 
 test("README documents configurable verification coverage", () => {
@@ -432,7 +491,7 @@ test("SessionStart hook is self-contained (no CLAUDE_PLUGIN_ROOT, no script path
   const cmd = hooks.hooks.SessionStart[0].hooks[0].command;
   assert.doesNotMatch(cmd, /CLAUDE_PLUGIN_ROOT/, "hook must not rely on plugin-root substitution");
   assert.match(cmd, /^node -e /, "hook logic is inlined via node -e");
-  assert.match(cmd, /docs\/plan-runner\//, "hook targets the docs/plan-runner/ gitignore entry");
+  assert.match(cmd, /\*\*\/plan-runner\//, "hook targets the **/plan-runner/ gitignore entry (base-agnostic)");
   assert.ok(!exists("scripts/ensure-gitignore.js"), "the old script file must be gone");
   assert.ok(hooks.hooks.SessionStart[0].hooks[0].timeout <= 10, "hook keeps a short timeout");
 });
