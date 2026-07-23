@@ -1,6 +1,6 @@
 # plan-runner
 
-![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fv1.14.0%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)
+![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fv1.15.0%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)
 
 Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning in Claude Code or Codex.
 
@@ -330,6 +330,14 @@ docs/plan-runner/{DATE}/cycle-{N}/
   fix-plan.md            # aggregator's next-cycle input
   manifest.json          # pipeline metadata
 ```
+
+**Output location detection.** plan-runner auto-detects where to store cycle artifacts by checking in order:
+1. A `plan_runner.output_dir` key in CLAUDE.md (at the active project root or any parent in the config chain).
+2. A `plan_runner.output_dir` key in AGENTS.md (same resolution scope).
+3. A top-level scan for an existing `docs/plan-runner/`, `build/plan-runner/`, or `.plan-runner/` directory to maintain consistency with previous runs.
+4. Default to `docs/plan-runner/` if none of the above resolve.
+
+This allows projects to centralize output handling (e.g., in CI artifacts or non-docs directories) without modifying the plugin and keeps multi-project setups consistent across re-runs.
 
 ## Requirements
 

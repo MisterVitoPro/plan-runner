@@ -2,6 +2,10 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.15.0 - 2026-07-23
+
+- **Auto-detected output location.** cycle artifacts are now stored in a location detected from (in order) a `plan_runner.output_dir` setting in CLAUDE.md, a `plan_runner.output_dir` setting in AGENTS.md, a top-level scan for existing `docs/plan-runner/`, `build/plan-runner/`, or `.plan-runner/` directories to maintain consistency with previous runs, or a default to `docs/plan-runner/`. This allows projects to customize artifact storage (e.g., to CI build directories or non-docs paths) without plugin configuration and keeps multi-project setups consistent across re-runs without manual intervention.
+
 ## 1.14.0 - 2026-07-19
 
 - **Pipelined verification (default).** The wave verifier no longer sits on the critical path between waves. Each wave now commits first (Step 4b), then dispatches its verifier against a read-only snapshot worktree pinned to that commit (Step 4c) and runs while the NEXT wave's dev agents work; the verdict is captured at the next wave's pickup or the end-of-range drain (Step 4g). At most one wave's verification is in flight, every verdict still lands before aggregation, and the honesty invariants are untouched: no self-verify, `UNVERIFIABLE` for a verdict that never lands, and the coverage gate still makes it structurally impossible to open a PR with an outstanding verdict. Kill-switch: `--sync-verify` or `verification.pipelined: false` in `.plan-runner.yml` (precedence flag > file > default `true`). No-git runs, waves with nothing to commit, and snapshot failures verify synchronously as before.

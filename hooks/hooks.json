@@ -1,5 +1,5 @@
 {
-  "description": "Plan Runner SessionStart hook for Claude Code and Codex: ensures docs/plan-runner/ is in .gitignore so generated plan artifacts are not committed. The logic is inlined via node -e and does not depend on a plugin-root variable.",
+  "description": "Plan Runner SessionStart hook for Claude Code and Codex: ensures **/plan-runner/ is in .gitignore so generated plan artifacts are not committed, regardless of where plan-runner is resolved. The logic is inlined via node -e and does not depend on a plugin-root variable.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('fs');try{const p='.gitignore',e='docs/plan-runner/';if(fs.existsSync(p)){const c=fs.readFileSync(p,'utf8');if(!c.split(/\\r?\\n/).some(l=>l.trim()===e)){fs.appendFileSync(p,(c.length>0&&!c.endsWith('\\n')?'\\n':'')+e+'\\n')}}}catch(err){}\"",
+            "command": "node -e \"const fs=require('fs');try{const p='.gitignore',e='**/plan-runner/';if(fs.existsSync(p)){const c=fs.readFileSync(p,'utf8');if(!c.split(/\\r?\\n/).some(l=>l.trim()===e)){fs.appendFileSync(p,(c.length>0&&!c.endsWith('\\n')?'\\n':'')+e+'\\n')}}}catch(err){}\"",
             "timeout": 5
           }
         ]

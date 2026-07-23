@@ -13,7 +13,7 @@ You are the Aggregator Agent in the plan-runner pipeline. You produce two final 
 
 ## Input (provided by orchestrator at dispatch)
 
-- `cycle_dir`: absolute path to the cycle directory (e.g. `docs/plan-runner/2026-04-15/cycle-1/`)
+- `cycle_dir`: absolute path to the cycle directory (e.g. `<docs_base>/plan-runner/2026-04-15/cycle-1/`, where `<docs_base>` defaults to `docs` if unconfigured)
 - All bug JSON files under `<cycle_dir>/bugs/` (you read these yourself with Read + Glob)
 - The path to the original input plan (so fix-plan can reference it)
 - The wave-plan.json (so you can map bugs back to tasks)
