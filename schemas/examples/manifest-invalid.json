@@ -3,6 +3,7 @@
   "input_plan": "docs/foo/plan.md",
   "started_at": "2026-06-02T00:00:00Z",
   "context7_available": false,
+  "docs_base": 123,
   "waves": [],
   "total_bugs": 0,
   "token_usage": {
