@@ -3,16 +3,17 @@
   "input_plan": "docs/foo/plan.md",
   "started_at": "2026-06-02T00:00:00Z",
   "context7_available": false,
+  "docs_base": 123,
   "waves": [],
   "total_bugs": 0,
   "token_usage": {
     "by_agent": [
-      {"agent": "analyzer", "phase": "analyze", "input": null, "output": null, "total": 5900, "source": "guessed"}
+      {"agent": "analyzer", "phase": "analyze", "input": null, "output": null, "total": 5900, "source": "self_report"}
     ],
     "total_tokens": 5900,
     "agents_reported": 1,
     "agents_total": 1,
     "complete": true
   },
-  "tdd": {"enabled": "yes"}
+  "tdd": {"enabled": true}
 }

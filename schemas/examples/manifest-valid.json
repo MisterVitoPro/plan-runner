@@ -6,6 +6,7 @@
   "context7_available": false,
   "git_available": true,
   "backend": "teams",
+  "docs_base": "documentation",
   "verification": {"mode": "per-wave", "waves_total": 1, "waves_verified": 1, "waves_skipped": 0},
   "waves": [
     {

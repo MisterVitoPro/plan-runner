@@ -1,6 +1,6 @@
 # plan-runner
 
-![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fv1.14.0%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)
+![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMisterVitoPro%2Fplan-runner%2Fv1.15.0%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)
 
 Take a free-form Markdown implementation plan and execute it through a parallel agent swarm with built-in verification and bug-driven re-planning in Claude Code or Codex.
 
@@ -322,7 +322,7 @@ aggregates bugs -- all generated artifacts remain in the cycle directory for rev
 Per cycle, output lives at:
 
 ```
-docs/plan-runner/{DATE}/cycle-{N}/
+<docs_base>/plan-runner/{DATE}/cycle-{N}/    # <docs_base> defaults to docs
   wave-plan.json         # analyzer output
   bugs/
     wave-W-agent-A.json  # one per verifier
@@ -330,6 +330,20 @@ docs/plan-runner/{DATE}/cycle-{N}/
   fix-plan.md            # aggregator's next-cycle input
   manifest.json          # pipeline metadata
 ```
+
+**Output location detection.** plan-runner resolves the output base `<docs_base>` at pre-flight (before any resume discovery), then writes the cycle tree under `<docs_base>/plan-runner/`. There is no settings key to configure -- resolution is three tiers, in order:
+
+1. **An explicit prose statement.** The repo-root `CLAUDE.md`, then the repo-root `AGENTS.md`, then any repository instructions already loaded into context, are checked for a sentence that explicitly names a documentation directory (e.g. "docs live in `documentation/`", "project docs are under `doc/`"). A vague mention of "docs" with no named directory does not count and falls through to the next tier.
+2. **A top-level scan.** Otherwise the repo-root top-level entries are scanned for a directory named literally `docs`, `doc`, `documentation`, or `.docs`, in that fixed order; the first match wins. If several exist, only the first in that order is used -- a second base is never created or used.
+3. **Default.** Otherwise `<docs_base>` is `docs`, which is the pre-1.15.0 behavior.
+
+The resolved base and where it came from are printed once at run start:
+
+```
+Output location: <docs_base>/plan-runner/ (from <CLAUDE.md | AGENTS.md | top-level scan | default>).
+```
+
+The resolved value is also recorded as `docs_base` in the cycle `manifest.json`. This lets a project that keeps its documentation somewhere other than `docs/` get plan-runner artifacts in the right place without any plugin configuration, and it keeps re-runs and resume consistent: when the resolved base differs from `docs`, resume discovery scans both `<docs_base>/plan-runner/**/run-state.json` and the legacy `docs/plan-runner/**/run-state.json`.
 
 ## Requirements
 
@@ -340,7 +354,7 @@ docs/plan-runner/{DATE}/cycle-{N}/
 
 ## Auto-Setup
 
-On first session start, a hook automatically adds `docs/plan-runner/` to `.gitignore` (if a `.gitignore` exists). Generated output is not committed and remains local to the working tree.
+On first session start, a hook automatically adds the base-agnostic `**/plan-runner/` entry to `.gitignore` (if a `.gitignore` exists), so generated artifacts stay ignored wherever `<docs_base>` resolves. Generated output is not committed and remains local to the working tree.
 
 ## License
 
