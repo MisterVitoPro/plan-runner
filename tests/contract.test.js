@@ -149,7 +149,7 @@ test("docs + version reflect the TDD feature", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "1.15.1", "plugin version is current");
+  assert.equal(claude.version, "1.16.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   const readme = read("README.md");
@@ -849,5 +849,108 @@ test("resume scan keeps only active run-states (no dead 'interrupted' filter)", 
     f,
     /`?overall_status`? is `?active`? or `?interrupted`?/,
     "R.1 no longer filters on the unreachable 'interrupted' status"
+  );
+});
+
+test("late-verdict reconciliation rule: an expired wait never closes a wave to a later verdict", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /\*\*Late-verdict reconciliation rule/, "must define the Late-verdict reconciliation rule");
+  // an expired bounded wait does not close the wave to a later verdict
+  assert.match(
+    f,
+    /does NOT close that wave to a later verdict/i,
+    "recording UNVERIFIABLE or dispatching a replacement must not close the wave to a later verdict"
+  );
+  // late verdicts are reconciled, not discarded
+  assert.match(
+    f,
+    /the orchestrator MUST reconcile rather than discard it/i,
+    "a late verdict must be reconciled rather than discarded"
+  );
+  // reconciliation is by UNION of findings
+  assert.match(f, /Reconcile by UNION of findings/, "reconciliation is by union of findings");
+  // a later/replacement CLEAN must never erase an earlier BUGS_FOUND
+  assert.match(
+    f,
+    /never let a later or replacement `?CLEAN`? verdict erase an earlier `?BUGS_FOUND`?/i,
+    "a later or replacement CLEAN must never erase an earlier BUGS_FOUND"
+  );
+  // both 4g drain and the Step 5.0 coverage gate cross-reference this rule
+  assert.match(
+    f,
+    /apply the late-verdict reconciliation rule \(4c\)/i,
+    "the 4g drain cross-references the late-verdict reconciliation rule"
+  );
+  assert.match(
+    f,
+    /it is a late verdict and MUST be reconciled per the late-verdict reconciliation rule \(4c\)/i,
+    "the Step 5.0 coverage gate cross-references the late-verdict reconciliation rule"
+  );
+});
+
+test("pr skill Step 4 resolves a generated fix-plan back to its original plan", () => {
+  const f = read("skills/pr/SKILL.md");
+  // detects a fix-plan by its H1 and/or the Original plan line
+  assert.match(
+    f,
+    /\^#\\s\+Fix Plan/,
+    "must detect a fix-plan via its H1 pattern"
+  );
+  assert.match(
+    f,
+    /\^\\\*\\\*Original plan:\\\*\\\*\\s\*\(\.\+\)\$/,
+    "must detect a fix-plan via the literal Original plan line pattern"
+  );
+  // chases transitively with a hop cap
+  assert.match(f, /Chase this transitively/i, "must chase the original-plan resolution transitively");
+  assert.match(f, /cap it at 3 hops/i, "transitive chase must be hop-capped");
+  // the conventional-commit TYPE is derived from the resolved original plan, not the fix-plan
+  assert.match(
+    f,
+    /the basename of the resolved `?input_plan`?[\s\S]{0,60}the original plan when one was resolved through a fix-plan, never the fix-plan/i,
+    "TYPE must be derived from the resolved original plan, never the fix-plan's own basename"
+  );
+});
+
+test("plan-analyzer: owned_files provenance, declared dependency order, and standalone non-testable tasks", () => {
+  const f = read("agents/plan-analyzer.md");
+  // owned_files may never be invented
+  assert.match(
+    f,
+    /Every `?owned_files`? entry across every agent traces back to a path the source plan actually names/i,
+    "owned_files must trace back to a path the source plan actually names, never invented"
+  );
+  // a plan-declared dependency graph is the ordering source of truth, not reordered for a TDD shape
+  assert.match(
+    f,
+    /Wave ordering matches any dependency graph the plan declares explicitly \(e\.g\. "Blocked by:" lines\); no task was reordered to fit a preferred shape against a declared dependency/i,
+    "a declared dependency graph (e.g. Blocked by: lines) is the ordering source of truth and is not reordered for a preferred (TDD) shape"
+  );
+  // non-runnable prose/docs/config tasks get role standalone / testable false, not a forced split
+  assert.match(
+    f,
+    /do NOT force a TDD shape on it: every task emits as `?role: "standalone"`?, `?testable: false`?, with an honest `?non_testable_reason`?/i,
+    "non-runnable prose/docs/config tasks get role standalone and testable false rather than a forced test-author+impl split"
+  );
+});
+
+test("plan-aggregator: fix-plan template mandates the literal Original plan line, copied transitively", () => {
+  const f = read("agents/plan-aggregator.md");
+  // the emitted template mandates the literal **Original plan:** line
+  assert.match(
+    f,
+    /\*\*Original plan:\*\* <absolute path to the original \(non-fix-plan\) source plan>/,
+    "the fix-plan template mandates the literal **Original plan:** line"
+  );
+  assert.match(
+    f,
+    /The `?\*\*Original plan:\*\*`? line must ALWAYS reference the original \(non-fix-plan\) source plan/i,
+    "the Original plan line's value must always be the true original"
+  );
+  // copied through transitively when the input was itself a fix-plan
+  assert.match(
+    f,
+    /extract and copy its `?\*\*Original plan:\*\*`? value transitively rather than pointing at the intermediate fix-plan/i,
+    "when the input plan is itself a fix-plan, its Original plan value is copied through transitively"
   );
 });

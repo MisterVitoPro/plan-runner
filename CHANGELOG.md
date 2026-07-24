@@ -2,6 +2,14 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.16.0 - 2026-07-23
+
+- **Late-verdict reconciliation.** An expired bounded wait for a wave verifier no longer permanently closes that wave against a verdict that shows up afterward. A verifier report arriving after its wave was already recorded `UNVERIFIABLE` or superseded by a replacement verifier is now reconciled by union of findings, and a later or replacement `CLEAN` can never erase an earlier `BUGS_FOUND`. Any aggregation, fix-plan, or PR artifacts already produced before the late verdict landed are revised to match -- including returning a PR to draft if it had already been published ready on a now-false zero-bug claim. This is what stops a wave's real verdict from being lost when a merely slow verifier gets mistaken for a dead one.
+- **PR title resolves through fix-plan cycles.** The PR-opening step now follows a generated fix-plan's `**Original plan:**` line back to the true original plan (chased transitively, with a hop cap), so a feature branch that went through one or more fix cycles is titled from the original plan instead of collapsing to `fix: fix plan (cycle 2)`.
+- The plan-analyzer agent may no longer invent `owned_files`, must honor a plan-declared dependency graph (`Blocked by:`) over its preferred TDD wave shape, and must not force test-author/impl roles onto non-runnable prose, docs, or config tasks.
+- Generated fix-plans from the plan-aggregator agent now carry a mandated `**Original plan:**` line naming the true original plan, copied through transitively across repeated fix cycles -- the source the PR-title fix above depends on.
+- `.claude-plugin/plugin.json`'s marketplace-facing `description` now documents the late-verdict reconciliation guarantee.
+
 ## 1.15.1 - 2026-07-23
 
 - **Marketplace description brought up to date.** The `description` in `.claude-plugin/plugin.json` -- which `marketplace-pin.yml` copies verbatim into the Claude catalog entry, and which is the only plugin copy users read when browsing the marketplace -- had drifted two releases behind: it never picked up large-plan phasing (1.13.0) or auto-detected output location (1.15.0). Both are now described. No behavior change; the version bump exists solely because the pin workflow only syncs the description on a version change.

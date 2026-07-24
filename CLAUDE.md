@@ -15,16 +15,19 @@ claude plugin validate .
 
 ## Version bump protocol
 
-A release touches five places, in one commit:
+A release touches six places, in one commit:
 1. `.claude-plugin/plugin.json` `version`
 2. `.codex-plugin/plugin.json` `version`
 3. The pinned version assertion in `tests/contract.test.js` ("docs + version reflect the ... feature")
 4. `package.json` `version`
 5. A new `CHANGELOG.md` entry (SemVer: new pipeline behavior = minor, prose/doc fix = patch)
+6. `.claude-plugin/plugin.json` `description` — update whenever the release adds or changes user-facing behavior (a pure internal fix may leave it unchanged)
 
-Tagging and the marketplace pin are **automated** by `.github/workflows/marketplace-pin.yml`: when a merge to `main` bumps the synchronized manifest version, it tags the merge commit `vX.Y.Z` and updates the plugin's `ref` + `sha` in both `MisterVitoPro/qa-claude-market` catalogs, plus the Claude catalog description. So a normal release is just: land the five-place version-bump commit on `main` via PR — the tag and both marketplace pins follow automatically. Don't hand-tag or hand-edit the marketplace for a routine release; doing both by hand races the workflow.
+Tagging and the marketplace pin are **automated** by `.github/workflows/marketplace-pin.yml`: when a merge to `main` bumps the synchronized manifest version, it tags the merge commit `vX.Y.Z` and updates the plugin's `ref` + `sha` in both `MisterVitoPro/qa-claude-market` catalogs, plus the Claude catalog description. So a normal release is just: land the six-place version-bump commit on `main` via PR — the tag and both marketplace pins follow automatically. Don't hand-tag or hand-edit the marketplace for a routine release; doing both by hand races the workflow.
 
-Caveats: the workflow authenticates to `qa-claude-market` with the `MARKETPLACE_DEPLOY_KEY` repo secret — the private half of an SSH deploy key registered with write access on that repo (scoped to it alone, not a personal PAT). Without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
+Caveats: the `.claude-plugin/plugin.json` `description` field is especially important — the workflow copies it verbatim into the plan-runner entry of the Claude marketplace catalog, which is the only plugin copy users see when browsing the marketplace. No automated check catches drift (`node --test`, `tests/validate_schemas.py` and `claude plugin validate` all pass with a stale description), so it must be checked by hand at release time. The workflow only syncs when `.claude-plugin/plugin.json`'s version differs from the previous commit, so a description-only merge to `main` is a no-op; correcting the blurb requires a version bump (and under SemVer, a prose fix counts as a patch release).
+
+The workflow authenticates to `qa-claude-market` with the `MARKETPLACE_DEPLOY_KEY` repo secret — the private half of an SSH deploy key registered with write access on that repo (scoped to it alone, not a personal PAT). Without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
 
 ## Honesty invariants (never weaken these)
 

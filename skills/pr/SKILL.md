@@ -86,12 +86,24 @@ If the push fails, print the git error and STOP (a PR needs a remote branch).
 ## Step 4: Build the conventional title
 
 1. Determine the subject source, in priority order:
-   - The plan's first H1 line. Read `input_plan` and take the first line matching
-     `^#\s+(.+)$`; use the captured text.
+   - Resolve `input_plan` back to the true originating plan first: a
+     plan-runner-generated fix-plan is identifiable by its header -- its first H1
+     matches `^#\s+Fix Plan` AND/OR it contains a line matching
+     `^\*\*Original plan:\*\*\s*(.+)$`. When `input_plan` matches, read the path
+     captured from that `**Original plan:**` line and use that file in place of
+     `input_plan`. Chase this transitively (a fix-plan's original plan may itself be
+     a fix-plan) but cap it at 3 hops; if a hop's target is missing, unreadable, or
+     revisits a path already seen (a cycle), stop chasing and fall through to the
+     next priority below instead of using the fix-plan's own "Fix Plan (cycle N)" H1
+     as a title subject.
+   - The resolved plan's first H1 line. Read the resolved `input_plan` and take the
+     first line matching `^#\s+(.+)$`; use the captured text.
    - Otherwise the first `task_title` from `wave-plan.json`.
    - Otherwise the literal `plan-runner run`.
-2. Determine the type: if the basename of `input_plan` OR the subject text contains
-   `fix` or `bug` (case-insensitive), use `fix`; otherwise use `feat`.
+2. Determine the type: if the basename of the resolved `input_plan` (from step 1 --
+   the original plan when one was resolved through a fix-plan, never the fix-plan
+   itself) OR the subject text contains `fix` or `bug` (case-insensitive), use `fix`;
+   otherwise use `feat`.
 3. Normalize the subject: strip a leading `Implementation Plan`/trailing
    `Implementation Plan` boilerplate if present, lowercase the first character, strip
    a trailing period, and hard-truncate to 60 characters at a word boundary.
