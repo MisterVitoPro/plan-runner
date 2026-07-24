@@ -18,12 +18,12 @@ Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pip
 
 ```bash
 # Claude Code
-claude plugin marketplace add MisterVitoPro/qa-claude-market
-claude plugin install plan-runner@mistervitopro-plugin-marketplace
+claude plugin marketplace add MisterVitoPro/esper
+claude plugin install plan-runner@esper
 
 # Codex
-codex plugin marketplace add MisterVitoPro/qa-claude-market
-codex plugin add plan-runner@mistervitopro-plugin-marketplace
+codex plugin marketplace add MisterVitoPro/esper
+codex plugin add plan-runner@esper
 ```
 
 Start a new session after installation. The bundled SessionStart hook requires Node.js on `PATH`; in Codex, review and trust it with `/hooks` before expecting automatic `.gitignore` setup.

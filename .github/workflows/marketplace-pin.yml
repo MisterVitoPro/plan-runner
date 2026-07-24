@@ -2,12 +2,12 @@ name: Marketplace pin
 
 # On every push to main, if this push bumped the plugin version (a release
 # merge), tag the merge commit v<version> and update the marketplace entry in
-# MisterVitoPro/qa-claude-market to pin the new ref + sha in both the Claude
+# MisterVitoPro/esper to pin the new ref + sha in both the Claude
 # Code and Codex catalogs (and sync the Claude description). Ordinary merges
 # that do not touch the version are a no-op.
 #
 # Requires a repo secret MARKETPLACE_DEPLOY_KEY: the private half of an SSH
-# deploy key registered with write access on MisterVitoPro/qa-claude-market.
+# deploy key registered with write access on MisterVitoPro/esper.
 # The default GITHUB_TOKEN cannot push to another repository; a deploy key is
 # scoped to exactly that one repo (least privilege, unlike a personal PAT).
 # Without it the "Checkout marketplace" step fails loudly.
@@ -70,7 +70,7 @@ jobs:
         if: steps.ver.outputs.release == 'true'
         uses: actions/checkout@v4
         with:
-          repository: MisterVitoPro/qa-claude-market
+          repository: MisterVitoPro/esper
           ssh-key: ${{ secrets.MARKETPLACE_DEPLOY_KEY }}
           path: market
 
