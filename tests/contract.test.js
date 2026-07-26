@@ -1054,3 +1054,97 @@ test("plan-aggregator: fix-plan template mandates the literal Original plan line
     "when the input plan is itself a fix-plan, its Original plan value is copied through transitively"
   );
 });
+
+test("SKILL pins the project-agent dispatch overlay: selection, guards, precedence, and provenance", () => {
+  const f = read("skills/run/SKILL.md");
+  // kill-switch flag and its yml counterpart
+  assert.match(
+    f,
+    /--no-project-agents.{0,40}if present, disable project-agent dispatch for this run/i,
+    "documents the --no-project-agents kill-switch flag"
+  );
+  assert.match(f, /Overrides `\.plan-runner\.yml` `agents\.project`/, "flag overrides the agents.project yml key");
+  assert.match(f, /use its `agents\.project` value/, "resolves the agents.project key from .plan-runner.yml");
+  // bundled-only rule for test-author, verifier, and aggregator dispatches
+  assert.match(
+    f,
+    /Test-author, verifier, and aggregator dispatches always use their bundled definitions, regardless of the inventory/,
+    "test-author/verifier/aggregator dispatches are always bundled-only"
+  );
+  // conservative selection rule and its plan-dev fallback
+  assert.match(
+    f,
+    /select a project agent whose `description` \*\*clearly covers\*\* the task's domain/,
+    "conservative selection rule requires the description to clearly cover the task's domain"
+  );
+  assert.match(f, /\*\*any doubt selects none\.\*\*/, "conservative selection rule: any doubt selects none");
+  assert.match(
+    f,
+    /Otherwise select none: the task is served by the bundled `plan-dev\.md`/,
+    "bundled fallback: unmatched tasks are served by bundled plan-dev.md"
+  );
+  // explicit-directive override
+  assert.match(
+    f,
+    /overrides the conservative description match/,
+    "an explicit routing directive overrides the conservative description match"
+  );
+  // tool-guard disqualification sentence
+  assert.match(
+    f,
+    /lists \*\*neither `Write` nor `Edit`\*\* cannot write files, so it is disqualified/,
+    "tool guard disqualifies a project agent lacking Write or Edit"
+  );
+  // model-precedence sentence
+  assert.match(
+    f,
+    /a serving project agent's `model:` frontmatter wins; when it declares none, the task's wave-plan `recommended_model` applies/,
+    "model precedence: agent frontmatter wins, else recommended_model"
+  );
+  // contract-overrides-agent-prose sentence
+  assert.match(
+    f,
+    /OVERRIDE any conflicting instruction in the agent definition above/,
+    "the per-invocation + Dev Return Contract explicitly override the serving agent's own prose"
+  );
+  // "served by <agent>" dispatch-line sentence
+  assert.match(
+    f,
+    /<agent_id>: served by <plan-dev \(bundled\) \| <name> \(project\)>/,
+    "prints the served-by provenance line at dispatch"
+  );
+  // return-validation flow: one re-prompt with the schema, then return_contract_violation + next-cycle pin
+  assert.match(
+    f,
+    /Re-prompt that agent once, with the schema alone/,
+    "return-contract validation re-prompts once with the schema"
+  );
+  assert.match(
+    f,
+    /add one `return_contract_violation` bug to this wave's bug JSON/,
+    "a second validation failure adds a return_contract_violation bug"
+  );
+  assert.match(
+    f,
+    /pin that task to bundled `plan-dev` for the next cycle/,
+    "a second validation failure pins the task to bundled plan-dev for the next cycle"
+  );
+});
+
+test("agents/plan-dev.md Dev Return Contract section holds the shared return skeleton (split halves cannot drift)", () => {
+  const f = read("agents/plan-dev.md");
+  assert.match(f, /^## Dev Return Contract$/m, "must have a labeled Dev Return Contract section");
+  const section = f.slice(f.indexOf("## Dev Return Contract"));
+  for (const key of [
+    "status",
+    "files_written",
+    "files_unexpectedly_modified",
+    "context7_queries",
+    "token_usage",
+  ]) {
+    assert.match(section, new RegExp(`"${key}"`), `Dev Return Contract skeleton includes ${key}`);
+  }
+  for (const status of ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"]) {
+    assert.match(section, new RegExp(status), `Dev Return Contract documents status value ${status}`);
+  }
+});

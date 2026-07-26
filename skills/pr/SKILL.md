@@ -153,6 +153,7 @@ P0: <n>   P1: <n>   P2: <n>   P3: <n>   (total: <total_bugs>)
 - Waves: <wave count>
 - Dev agents: <dev agent count>
 - Backend: <backend>
+- Agent sources: <bundled count and per-project-agent counts -- see below; line omitted when absent>
 - Tokens: <token_usage.total_tokens> across <agents_reported>/<agents_total> subagents<if token_usage present but not complete: " (partial)">
   - By phase: analyze <sum>, dev <sum>, verify <sum>, aggregate <sum>
 
@@ -166,6 +167,21 @@ subagent was dispatched in it (e.g. aggregate on a zero-bug run).
 
 Omit the `Tokens:` line (and its `By phase` sub-bullet) entirely when `token_usage`
 is absent or null (pre-1.5.0 manifests, or a run where no figure was captured).
+
+The `Agent sources:` line is built from every wave's `agents[].agent_source` (see
+`schemas/manifest.schema.json`, added 1.19.0: `"bundled"` for the built-in
+`plan-dev` role, or `"project:<name>"` when a project agent served the dispatch).
+Walk `waves[].agents[]` across the whole manifest and tally the exact
+`agent_source` string of each entry that has one. Render `bundled <n>` first (when
+that bucket is non-empty), followed by one `project:<name> <n>` clause per distinct
+project agent, sorted alphabetically by name, each joined with `, `. Example:
+`Agent sources: bundled 3, project:frontend-dev-expert 2`.
+
+Omit the `Agent sources:` line entirely when no agent entry in any wave carries
+`agent_source` -- a manifest written before 1.19.0 predates the field, and every
+dispatch on it was necessarily bundled, but that is an inference, not a recorded
+fact, so it must not be reported. Tally only entries that actually carry the field;
+never count, guess, or backfill a value for an entry that lacks it.
 
 Omit the verification banner entirely when `verification.waves_skipped` is 0 (full
 coverage -- nothing to warn about).
