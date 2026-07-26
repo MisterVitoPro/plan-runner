@@ -463,6 +463,7 @@ Validate the wave plan:
 1. Conforms to `../../schemas/wave-plan.schema.json`, resolved relative to this skill (use Python+jsonschema if available; otherwise structural check: required fields present, agent counts <=6, file paths unique within each wave). Note that `rationale` and `complexity_signals` are optional -- do NOT fail validation if they are absent.
 2. Within each wave, the union of `owned_files` across all agents has no duplicates.
 3. Every agent has a `task_excerpt_lines` matching `^[0-9]+-[0-9]+$` where START <= END and END <= total lines in the plan file.
+4. For every agent with `role: "impl"`, every path in `tests_to_satisfy` MUST either (a) exist on disk right now, or (b) appear in the `owned_files` of a `test-author` agent in an EARLIER wave of this wave plan. One existence check per path -- fully mechanical. If neither holds, the path can never gate anything: the green gate's single-file run would match zero tests, exit 0, and record a vacuous `PASSED` for an implementation nothing verified (the analyzer role already forbids emitting such paths -- this check is what enforces it). Fail validation and STOP, naming the impl agent and each unresolvable path. Case (b) is what lets a first-run TDD cycle reference tests that do not exist yet; case (a) is what lets a fix-plan re-run reference pre-existing tests.
 
 If validation fails, print the failure reason and STOP. Do NOT auto-retry beyond what is specified above (avoid infinite loops).
 
