@@ -17,7 +17,8 @@
             "covers add(2,3) == 5"
           ],
           "recommended_model": "sonnet",
-          "role": "implementer"
+          "role": "implementer",
+          "inline_tests": "yes"
         }
       ]
     }

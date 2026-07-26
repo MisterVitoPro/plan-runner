@@ -95,6 +95,28 @@ test("Step 2 validation resolves every tests_to_satisfy path (no vacuous green f
   assert.match(f, /first-run TDD cycle[\s\S]{0,120}fix-plan re-run/i, "explains why both cases are needed");
 });
 
+test("Step 2 validation keeps test-author owned_files disjoint from the paired impl (no vacuous red)", () => {
+  const f = read("skills/run/SKILL.md");
+  // disjointness is required across waves, paired via tests_to_satisfy
+  assert.match(f, /`owned_files` MUST be disjoint from the `owned_files` of every paired `impl` agent/i, "test-author/impl owned_files must be disjoint");
+  assert.match(f, /impl's `tests_to_satisfy` intersects the test-author's `owned_files`/i, "pairing is derived from tests_to_satisfy");
+  assert.match(f, /Waves being different does NOT excuse the overlap/i, "cross-wave overlap is still a failure");
+  // the recorded consequence: vacuous red -> paired impl silently skipped
+  assert.match(f, /red gate runs zero tests, exits 0, and the invalid-red rule silently skips the paired impl/i, "records the vacuous-red failure mode");
+  // the single legitimate exception is an explicit schema-level opt-in, capped at one shared file
+  assert.match(f, /`inline_tests: true`[\s\S]{0,220}exactly ONE file/i, "inline_tests exception shares exactly one file");
+  assert.match(f, /naming both agents and each shared path/i, "STOP names both agents and the shared path");
+  // the schema carries the opt-in field, back-compat noted
+  const schema = JSON.parse(read("schemas/wave-plan.schema.json"));
+  const agentProps = schema.properties.waves.items.properties.agents.items.properties;
+  assert.equal(agentProps.inline_tests.type, "boolean", "wave-plan schema defines inline_tests as boolean");
+  assert.match(agentProps.inline_tests.description, /pre-1\.18\.0/, "inline_tests description notes back-compat");
+  // the analyzer role documents when to emit it
+  const analyzer = read("agents/plan-analyzer.md");
+  assert.match(analyzer, /inline_tests: true/, "analyzer role documents the inline_tests opt-in");
+  assert.match(analyzer, /unreachable from an external test file/i, "analyzer role scopes the exception to unreachable targets");
+});
+
 test("SKILL Step 4a dispatches agents by role (test-author vs impl)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /\.\.\/\.\.\/agents\/plan-test-author\.md/, "Step 4 must load the bundled plan-test-author role");

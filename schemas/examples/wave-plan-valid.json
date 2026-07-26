@@ -48,6 +48,38 @@
           "non_testable_reason": "pure docs, no behavior to test"
         }
       ]
+    },
+    {
+      "wave_id": 4,
+      "agents": [
+        {
+          "agent_id": "wave-4-agent-1",
+          "task_title": "write inline unit tests for the report CLI",
+          "task_excerpt_lines": "40-48",
+          "owned_files": ["src/bin/report.js"],
+          "acceptance_criteria": ["covers the summary and csv output modes"],
+          "recommended_model": "sonnet",
+          "role": "test-author",
+          "testable": true,
+          "inline_tests": true
+        }
+      ]
+    },
+    {
+      "wave_id": 5,
+      "agents": [
+        {
+          "agent_id": "wave-5-agent-1",
+          "task_title": "implement the report CLI",
+          "task_excerpt_lines": "40-48",
+          "owned_files": ["src/bin/report.js"],
+          "acceptance_criteria": ["report emits summary and csv output"],
+          "recommended_model": "sonnet",
+          "role": "impl",
+          "testable": true,
+          "tests_to_satisfy": ["src/bin/report.js"]
+        }
+      ]
     }
   ],
   "uncovered_plan_sections": [],
