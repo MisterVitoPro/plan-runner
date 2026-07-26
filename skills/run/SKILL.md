@@ -940,8 +940,12 @@ Gates are applied **per agent**, by `role`, because a single wave may mix test-a
 
 **Impl agent (role: impl) -> GREEN gate (targeted, per agent):**
 1. For each file in the agent's `tests_to_satisfy`, run the single-file test command (substitute `{file}`). Capture exit + output per file.
-2. Record `green_run` = `{cmd, exit, result: all target files passed ? "PASSED" : "FAILED"}`.
-3. `captured_test_output` = the per-file `tests_to_satisfy` run output + the shared suite-regression block below.
+2. Parse the runner-reported executed/collected test count from each run's output (`N passed`, `ran N tests`, `collected N items`, and the runner's equivalent). Every major runner exits 0 when its filter matches zero tests -- `cargo test <filter>`, `pytest -k`, `go test -run`, `npm test -- <path>`, `dotnet test --filter` -- so the exit code alone cannot distinguish a genuine pass from a run that executed nothing.
+3. Record `green_run` = `{cmd, exit, result, valid_green}`:
+   - **Zero tests ran** for any target file -> `result: "INVALID"`, `valid_green: false`. NEVER record `PASSED` for a run that executed nothing: an implementation whose tests never ran is not verified.
+   - Count parsed and > 0 for every target file -> `result: all target files passed ? "PASSED" : "FAILED"`, `valid_green: true`.
+   - Count unparseable (unknown runner output shape) -> keep the exit-code result (`"PASSED"` / `"FAILED"`) and record `valid_green: null` -- the honest fallback. NEVER estimate or infer a count; the green-gate verifier judges the raw output, the same division of labour the invalid-red rule uses (mechanical exit/count from the orchestrator, semantic judgment from the verifier).
+4. `captured_test_output` = a first line `GREEN GATE TEST COUNT: <count per target file, or "unparsed">` + the per-file `tests_to_satisfy` run output + the shared suite-regression block below.
 
 **Standalone agent (role: standalone or classic):** no gate; `captured_test_output` is empty.
 
@@ -950,6 +954,8 @@ Gates are applied **per agent**, by `role`, because a single wave may mix test-a
 **Append evidence to the manifest `tdd.tasks` array** (one entry per testable task, keyed by `task_title`): `{task, test_files, red_run, green_run}`. The red_run is filled when the test-author wave runs; green_run when the paired impl wave runs (match by task_title / tests_to_satisfy).
 
 **Invalid red (paired impl skipped):** if the red gate shows the new tests PASSED (exit 0 -- the orchestrator detects this directly), do NOT dispatch the paired impl agent -- mark it BLOCKED with reason "paired test red gate invalid" and set `valid_red: false` for that task in the manifest. The red-gate VERIFIER's judgment (syntax / collection error = invalid) may still be in flight when the paired impl dispatches on a pipelined run: when that verdict is already in hand and judged the red invalid, skip the impl the same way; when it is still outstanding, dispatch the impl on the mechanical exit-code evidence rather than stalling the wave -- if the verdict then lands invalid, backfill `valid_red: false`, and the invalid-red P1 bug plus the impl's own green gate and verifier flow the gap into the next cycle. The verifier still emits the P1 bug from the captured output either way.
+
+**Invalid green (mirrors invalid red):** a green gate recorded `INVALID` / `valid_green: false` executed nothing, so the task is NOT treated as satisfied -- but there is no downstream agent to skip, so the wave proceeds normally and the gap is routed as a bug: the green-gate verifier reads the `GREEN GATE TEST COUNT` line in the captured output and flags the P1 `incorrect_implementation` bug (an exit-0 pass that ran zero tests), which flows through the normal aggregate -> fix-plan -> re-run loop. On a `valid_green: null` run the verifier makes the call from the raw output; the orchestrator never upgrades `null` to `true` on its own.
 
 ### 4b. Commit the wave
 

@@ -125,7 +125,8 @@
                 "properties": {
                   "cmd": {"type": "string"},
                   "exit": {"type": "integer"},
-                  "result": {"type": "string"}
+                  "result": {"type": "string", "description": "PASSED | FAILED | INVALID. INVALID (since the invalid-green rule) means the run executed zero tests -- an exit-0 pass that ran nothing is never recorded PASSED."},
+                  "valid_green": {"type": ["boolean", "null"], "description": "False when the green gate ran zero tests (result INVALID); null when the runner's test count could not be parsed and the verifier judges the raw output instead. Optional -- manifests written before the invalid-green rule (pre-1.18.0) omit it."}
                 }
               }
             }
