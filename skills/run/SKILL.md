@@ -876,6 +876,7 @@ task_title: <task_title>
 plan_path: <absolute path to the source plan>
 task_excerpt_lines: <task_excerpt_lines>
 context7_available: <bool>
+return_file: <absolute path: $phase_dir/returns/wave-<W>-<agent_id>.json>
 <if role == "test-author": "test_command: <single-file form> (full: <full form>)">
 
 OWNED FILES (you may write only these):
@@ -884,6 +885,12 @@ OWNED FILES (you may write only these):
 ACCEPTANCE CRITERIA:
 <acceptance_criteria joined with newlines, prefixed with "- ">
 <if role == "impl": a "TESTS TO SATISFY (make these pass; do not edit them):" block listing tests_to_satisfy, one per line>
+
+FILE-BACKED RETURN: as your LAST action, write your final JSON status verbatim to
+return_file (create its returns/ directory if needed). The orchestrator reads that
+file as the source of truth; your final message is a convenience preview of the same
+JSON. return_file is exempt from the OWNED FILES restriction -- write nothing else
+outside your owned files.
 
 Return only the JSON status, nothing else.
 ```
@@ -897,15 +904,15 @@ Dispatch depends on `backend`:
 **Backend `teams`:** The session is the team lead.
 1. Create one task on the shared team task list per wave-plan agent, embedding the per-invocation prompt parameters (agent_id, task_title, plan_path, task_excerpt_lines, owned files, acceptance criteria, role-specific blocks) in the task detail. Give the wave's tasks no unmet dependencies so they are all immediately claimable (cross-wave ordering is enforced by the lead opening one wave at a time, not by global DAG edges).
 2. Spawn one teammate per task (honor the <=6-per-wave cap), each receiving the role-selected bundled definition and using the role's `recommended_model` when available. Teammates self-claim the wave's tasks.
-3. Read teammate progress from the task list / mailbox -- do NOT pull full JSON returns into the lead context. Each teammate records its final JSON status as its task result / final message.
+3. Read teammate progress from the task list / mailbox -- do NOT pull full JSON returns into the lead context until an agent's return is being captured. Each teammate's durable return is its `return_file` (`$phase_dir/returns/wave-<W>-<agent_id>.json`, from its dispatch prompt): poll for that file's existence within the wave barrier's bounded wait and read the final JSON status from it. The task result / mailbox message is a convenience preview only -- never depend on retrieving it for correctness: `TaskOutput` cannot resolve a named background agent, and a `SendMessage` "resend your final JSON" request races the teammate's idle teardown and can go permanently unanswered. A return file that fails to parse may be a write caught mid-flight; re-read it once after a short pause before treating it as absent.
 
 For each dev agent return (both backends):
-1. Parse the JSON. If parse fails, treat as `{"agent_id": "<id>", "status": "BLOCKED", "files_written": [], "files_unexpectedly_modified": [], "context7_queries": [], "summary": "agent returned non-JSON output", "concerns": ["unparseable response"]}` and continue.
+1. Read the agent's `return_file` and parse the JSON; when the file is missing or unparseable, fall back to parsing the agent's final message / completion result. If both sources fail, treat as `{"agent_id": "<id>", "status": "BLOCKED", "files_written": [], "files_unexpectedly_modified": [], "context7_queries": [], "summary": "agent returned non-JSON output", "concerns": ["unparseable response"]}` and continue.
 2. Update the corresponding progress item or fallback checklist entry to `completed`.
 3. Record the dev_status in a wave-state map.
 4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}`: harness completion usage first; when it is absent -- common for teammates on the `teams` backend -- fall back to the `token_usage` self-report in the agent's return JSON; record `tokens: null` only when both are missing.
 
-**Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), read the owned-file state directly, treat any unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
+**Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), check the teammate's `return_file` first -- a parked or already-gone teammate whose return file exists and parses HAS completed; capture it normally. Only when the return file is also absent read the owned-file state directly, treat the unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
 
 **Rogue-commit guard (both backends, only if `git_available` is true):** Dev agents are forbidden from committing, but one that disobeys leaves a clean working tree that makes its work look undone. Before treating any dev agent as silent-failed (missing return, empty owned-file diff, no working-tree changes) -- and before dispatching any retry or replacement agent for it -- run `git log --oneline <wave_start_sha>..HEAD -- <owned_files>` scoped to that agent's owned files. If commits appear, the agent rogue self-committed: the work counts as delivered, so do NOT dispatch a retry agent. Print a warning naming the agent and the rogue commit SHA(s), record the SHAs in the wave-state map, and let the wave verifier (4c) judge the content exactly as it would judge uncommitted work. Judging by working-tree diff alone is not sufficient evidence that an agent did nothing.
 
@@ -916,7 +923,7 @@ A finished dev agent does not exit on its own -- it stays resident (an idle back
 - **Backend `subagent`:** release or stop the subagent with the host-native facility when it remains resident; if it exits automatically, no action is required.
 - **Backend `teams`:** stop the teammate with its agent ID (`name@team`) or bare teammate name.
 
-Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BLOCKED`) -- a blocked agent still holds its process open. If `TaskStop` reports the task already gone, treat that as success; there is nothing left to release. Do this for every wave, not only the last one -- letting agents from wave 1 idle until the whole cycle ends wastes resources for the run's entire duration.
+Tear down every dev agent in the wave, regardless of `dev_status` (`DONE` or `BLOCKED`) -- a blocked agent still holds its process open. If `TaskStop` reports the task already gone, treat that as success; there is nothing left to release. Teardown cannot lose a result: the agent's return is file-backed in `$phase_dir/returns/`, which survives the stop. Do this for every wave, not only the last one -- letting agents from wave 1 idle until the whole cycle ends wastes resources for the run's entire duration.
 
 ### 4a-ter. Run gates (only if tdd_enabled)
 
@@ -1016,6 +1023,7 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
 
     wave_id: <W>
     snapshot_root: <absolute snapshot path, or "n/a" (read the working tree)>
+    return_file: <absolute path: $phase_dir/returns/wave-<W>-verifier.json, or wave-<W>-agent-<n>-verifier.json for a per-agent verifier>
 
     AGENTS IN THIS WAVE:
     <for each dev agent in scope for this verifier, repeat the block:>
@@ -1040,15 +1048,20 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
     ---
     <end repeat>
 
+    FILE-BACKED RETURN: as your LAST action, write your bug-report JSON verbatim to
+    return_file (create its returns/ directory if needed). The orchestrator reads that
+    file as the source of truth for your verdict; your final message is a convenience
+    preview of the same JSON. Write nothing else anywhere.
+
     Return only the JSON bug report, nothing else.
 
 **Do NOT wait (pipelined waves).** On a pipelined wave, dispatch the verifier(s) in the background (subagent backend) or as teammates (teams backend) and proceed straight to the next wave -- the verdict is captured at the next wave's pickup (top of this step) or the end-of-range drain (4g). On a synchronous wave, wait now (rules below) and run the capture -- 4d, 4e, capture half of 4f -- inline before moving on.
 
 **Waiting for verifiers (backend-aware; applies at every capture point -- pickup, drain, or a synchronous wave).** For `per-agent`, wait for ALL N verifiers. The verdict must come from each verifier's own report -- never from the orchestrator's own reading of the code:
 
-**Backend `subagent` (default):** each verifier runs as a background task; wait for its completion notification. Collect each return JSON.
+**Backend `subagent` (default):** each verifier runs as a background task; wait for its completion notification. Collect each return JSON -- and when a completion result surfaces no parseable JSON, read the verifier's `return_file` before falling back to the synthetic UNVERIFIABLE handling in 4d.
 
-**Backend `teams`:** each verifier runs as a teammate (or a plain subagent receiving the bundled role definition). Because the team task status lags, do NOT treat "no status update yet" as "no verdict." Deterministically poll the verifier's task result / mailbox with a generous bounded wait, re-reading each until the bug-report JSON (its final message) is retrieved. Read the verdict from the task result, not by inferring it.
+**Backend `teams`:** each verifier runs as a teammate (or a plain subagent receiving the bundled role definition). Its verdict is file-backed: deterministically poll for the verifier's `return_file` (`$phase_dir/returns/wave-<W>-verifier.json`, or `wave-<W>-agent-<n>-verifier.json` per-agent) with a generous bounded wait, and read the bug-report JSON from that file -- it is durable and race-free, and it survives the verifier idling, parking, or being torn down. Because the team task status lags, do NOT treat "no status update yet" as "no verdict." The task result / mailbox message is a convenience preview only -- never depend on retrieving it for the verdict: `TaskOutput` cannot resolve a named background agent, and a `SendMessage` resend request races the verifier's idle teardown and can go permanently unanswered. Read the verdict from the return file, not by inferring it.
 
 **No-self-verify rule (both backends, hard requirement):** The orchestrator MUST NOT perform the verification itself, MUST NOT substitute its own judgment for a verifier's report, and MUST NOT write a wave's verdict-capture artifacts (4d) from its own reading of the code. Pipelining changes only WHEN a verdict is awaited, never WHETHER: no verdict may remain outstanding past the 4g drain, and Step 5 / Step 8 are unreachable while any dispatched verifier's report is missing. If the bounded wait genuinely expires without a report, do NOT self-verify to "rescue" the wave: the missing verdict flows into 4d as `UNVERIFIABLE` so the gap routes through the normal verify -> aggregate -> fix-plan -> re-run loop. A late or missing verdict becomes a tracked bug, never a silently-closed wave.
 
@@ -1064,7 +1077,7 @@ The per-invocation prompt (unchanged from the single-verifier form, repeated per
 
 Produce the wave's `bugs/wave-<W>.json` according to how 4c verified it:
 
-**Single-verifier waves (`per-wave`, or the final wave under `last-wave-only`):** parse the verifier's return. If parse fails, synthesize:
+**Single-verifier waves (`per-wave`, or the final wave under `last-wave-only`):** parse the verifier's return (its `return_file` first, falling back to its returned message). If both fail, synthesize:
 ```json
 {"wave_id": <W>, "verifier_status": "UNVERIFIABLE", "agent_statuses": {}, "bugs": [{"bug_id": "wave-<W>-bug-1", "severity": "P2", "category": "incorrect_implementation", "title": "Wave verifier returned non-JSON output", "file": "n/a", "line": null, "evidence": "<truncated raw output>", "expected": "Valid JSON bug report", "suggested_fix": "Re-run verification manually"}]}
 ```

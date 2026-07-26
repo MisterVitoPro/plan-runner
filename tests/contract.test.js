@@ -108,8 +108,8 @@ test("SKILL loads every bundled pipeline role relative to itself", () => {
 
 test("SKILL gates each wave on the verifier and forbids the orchestrator self-verifying", () => {
   const f = read("skills/run/SKILL.md");
-  // teams-aware verifier completion: poll the actual task result, not a status guess
-  assert.match(f, /poll the verifier's task result|task result \/ mailbox[\s\S]{0,200}verifier/i, "teams backend must poll the verifier's task result");
+  // teams-aware verifier completion: poll the durable return file, not a status guess
+  assert.match(f, /poll for the verifier's `return_file`/i, "teams backend must poll the verifier's return file");
   // explicit no-self-verify rule
   assert.match(f, /No-self-verify|MUST NOT perform the verification itself|MUST NOT substitute its own judgment/i, "must forbid the orchestrator from self-verifying");
   // missing verdict routes to UNVERIFIABLE, not a silently-closed wave
@@ -477,13 +477,41 @@ test("README documents token accounting", () => {
 });
 
 test("read-only pipeline agents declare least-privilege tools", () => {
-  // verifier and analyzer must not carry write tools; aggregator writes only via Write
+  // analyzer must not carry write tools; verifier gets Write ONLY for its file-backed
+  // return_file (reason recorded in its rules); aggregator writes only via Write
   const verifier = read("agents/plan-verifier.md");
-  assert.match(verifier, /^tools:\s*Read,\s*Grep,\s*Glob\s*$/m, "verifier is read-only");
+  assert.match(verifier, /^tools:\s*Read,\s*Grep,\s*Glob,\s*Write\s*$/m, "verifier adds Write for its return_file, nothing broader");
+  assert.match(verifier, /sole reason `Write` is in your tools/i, "verifier records why Write was broadened");
   const analyzer = read("agents/plan-analyzer.md");
   assert.match(analyzer, /^tools:\s*Read,\s*Grep,\s*Glob\s*$/m, "analyzer is read-only");
   const aggregator = read("agents/plan-aggregator.md");
   assert.match(aggregator, /^tools:\s*Read,\s*Grep,\s*Glob,\s*Write\s*$/m, "aggregator gets Write but nothing broader");
+});
+
+test("agent returns are file-backed: durable return_file handoff, mailbox is preview-only", () => {
+  const f = read("skills/run/SKILL.md");
+  // both dispatch prompts carry a deterministic return_file path under the cycle's returns/ dir
+  assert.match(f, /return_file: <absolute path: \$phase_dir\/returns\/wave-<W>-<agent_id>\.json>/, "dev dispatch prompt names the agent's return_file");
+  assert.match(f, /return_file: <absolute path: \$phase_dir\/returns\/wave-<W>-verifier\.json/, "verifier dispatch prompt names its return_file");
+  assert.match(f, /wave-<W>-agent-<n>-verifier\.json/, "per-agent verifiers get per-agent return files");
+  // both prompts instruct the write as the agent's LAST action
+  assert.match(f, /FILE-BACKED RETURN: as your LAST action/, "dispatch prompts mandate the final-action file write");
+  // the orchestrator reads the file as source of truth; the message is never load-bearing
+  assert.match(f, /file as the source of truth/i, "return file is the source of truth");
+  assert.match(f, /convenience preview/i, "task result / mailbox message is preview-only");
+  assert.match(f, /TaskOutput` cannot resolve a named background agent/, "records why the mailbox cannot be depended on");
+  assert.match(f, /races the (teammate|verifier)'s idle teardown/, "records the resend/teardown race");
+  // capture order: file first, message fallback, synthetic BLOCKED/UNVERIFIABLE only when both fail
+  assert.match(f, /`return_file` and parse the JSON; when the file is missing or unparseable, fall back/, "dev capture reads the file first");
+  assert.match(f, /its `return_file` first, falling back to its returned message/, "verifier capture reads the file first");
+  // the stuck-teammate fallback checks the return file before declaring BLOCKED
+  assert.match(f, /check the teammate's `return_file` first/, "wave-barrier fallback consults the return file before BLOCKED");
+  // teardown is explicitly safe because returns survive it
+  assert.match(f, /return is file-backed in `\$phase_dir\/returns\/`, which survives the stop/, "teardown cannot lose a file-backed return");
+  // the verifier role honors the handoff
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /File-backed return/i, "verifier role defines the file-backed return rule");
+  assert.match(verifier, /exception is writing your own `return_file`/, "verifier no-modify rule carves out only the return file");
 });
 
 test("SessionStart hook is self-contained (no CLAUDE_PLUGIN_ROOT, no script paths)", () => {

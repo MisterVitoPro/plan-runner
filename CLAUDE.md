@@ -41,7 +41,7 @@ The workflow authenticates to `esper` with the `MARKETPLACE_DEPLOY_KEY` repo sec
 - Verification is pipelined off the critical path (since 1.14): dispatched right after the wave commit against a snapshot worktree of that commit, at most one wave's verification in flight, every verdict drained before aggregation. `--sync-verify` / `verification.pipelined: false` restores synchronous per-wave verification; no-git and no-commit waves are always synchronous.
 - Resolve pipeline role files relative to the active `SKILL.md` and include their instructions in native subagent prompts. Never depend on Codex automatically registering `agents/` files.
 - git is optional: every git operation must be gated on `git_available`.
-- Agents keep least-privilege `tools:` frontmatter — verifier and analyzer are read-only (`Read, Grep, Glob`); aggregator adds only `Write`. Don't broaden these without a reason recorded in the agent's rules.
+- Agents keep least-privilege `tools:` frontmatter — the analyzer is read-only (`Read, Grep, Glob`); the verifier adds `Write` solely for its file-backed `return_file` (reason recorded in its rules); aggregator adds only `Write`. Don't broaden these without a reason recorded in the agent's rules.
 
 ## Schemas
 
