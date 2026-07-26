@@ -213,6 +213,10 @@ test("docs + version reflect the TDD feature", () => {
   assert.equal(claude.version, "1.18.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
+  // the marketplace blurb stays ecosystem-length (median ~150 chars across public
+  // catalogs; every browsing surface truncates past a few lines) -- per-release
+  // feature detail belongs in CHANGELOG/README, never appended here
+  assert.ok(claude.description.length <= 300, "marketplace description stays a short blurb (see CLAUDE.md release protocol)");
   const readme = read("README.md");
   assert.match(readme, /--no-tdd/, "README documents the --no-tdd flag");
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
