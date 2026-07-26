@@ -117,6 +117,32 @@ test("Step 2 validation keeps test-author owned_files disjoint from the paired i
   assert.match(analyzer, /unreachable from an external test file/i, "analyzer role scopes the exception to unreachable targets");
 });
 
+test("green gate detects invalid greens: zero tests ran is never PASSED", () => {
+  const f = read("skills/run/SKILL.md");
+  // the orchestrator parses the runner-reported count and knows exit 0 alone proves nothing
+  assert.match(f, /exits 0 when its filter matches zero tests/i, "records the exit-0-on-zero-match runner behavior");
+  // zero tests ran -> INVALID + valid_green false, never PASSED
+  assert.match(f, /Zero tests ran[\s\S]{0,80}`result: "INVALID"`, `valid_green: false`/, "zero tests ran records INVALID");
+  assert.match(f, /NEVER record `PASSED` for a run that executed nothing/, "an empty run is never a pass");
+  // unparseable count -> honest null, judged by the verifier (mirrors valid_red's division of labour)
+  assert.match(f, /valid_green: null` -- the honest fallback/, "unparseable count records null, never a guess");
+  assert.match(f, /never upgrades `null` to `true` on its own/i, "orchestrator cannot upgrade a null valid_green");
+  // the count is surfaced to the verifier in the captured output
+  assert.match(f, /GREEN GATE TEST COUNT/, "captured output carries the parsed count");
+  // the named invalid-green rule mirrors invalid red and routes a P1 through the verifier path
+  assert.match(f, /Invalid green \(mirrors invalid red\)/i, "invalid-green rule is named alongside invalid red");
+  assert.match(f, /Invalid green[\s\S]{0,400}P1 `incorrect_implementation`/, "invalid green flows as a P1 via the verifier");
+  // the verifier's green-gate mode is instructed to distrust a pass that ran nothing
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /Tests must actually run\.[\s\S]{0,340}INVALID green/i, "verifier green-gate mode checks the run count");
+  assert.match(verifier, /that call is yours, not the orchestrator's/i, "unparsed counts are the verifier's judgment");
+  // the manifest schema records valid_green with back-compat
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  const greenRun = schema.properties.tdd.properties.tasks.items.properties.green_run.properties;
+  assert.deepEqual(greenRun.valid_green.type, ["boolean", "null"], "manifest schema defines valid_green as boolean|null");
+  assert.match(greenRun.valid_green.description, /pre-1\.18\.0/, "valid_green description notes back-compat");
+});
+
 test("SKILL Step 4a dispatches agents by role (test-author vs impl)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /\.\.\/\.\.\/agents\/plan-test-author\.md/, "Step 4 must load the bundled plan-test-author role");

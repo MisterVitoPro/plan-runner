@@ -126,10 +126,11 @@ You receive `captured_test_output` from the orchestrator running the agent's new
 
 You receive `captured_test_output` from the orchestrator re-running `tests_to_satisfy` plus the full suite.
 
-1. **Target tests must PASS.** If any test in `tests_to_satisfy` still fails, flag a P0 `missing_requirement` bug (implementation does not satisfy its tests) with the failing test names in `evidence`.
-2. **No new suite failures.** If the full-suite output shows a newly failing pre-existing test, flag a P0 `broken_existing` bug.
-3. **Then run the normal static checks from the `## Process` section above** against the impl's `owned_files` and `acceptance_criteria`.
-4. If every target test passes, no pre-existing test broke, and the static checks find no gaps, the agent is `CLEAN`.
+1. **Tests must actually run.** The output's first line is the orchestrator's parsed count (`GREEN GATE TEST COUNT: ...`). If it -- or the raw output -- shows zero tests were collected/executed for the target files (a count of 0, "no tests ran", a filter that matched nothing, a test file not found), that is an INVALID green: flag a P1 `incorrect_implementation` bug. An exit-0 run that executed nothing does not satisfy `tests_to_satisfy`, however clean it looks. When the count line reads `unparsed`, judge from the raw output whether anything actually ran -- that call is yours, not the orchestrator's.
+2. **Target tests must PASS.** If any test in `tests_to_satisfy` still fails, flag a P0 `missing_requirement` bug (implementation does not satisfy its tests) with the failing test names in `evidence`.
+3. **No new suite failures.** If the full-suite output shows a newly failing pre-existing test, flag a P0 `broken_existing` bug.
+4. **Then run the normal static checks from the `## Process` section above** against the impl's `owned_files` and `acceptance_criteria`.
+5. If the target tests actually ran and passed, no pre-existing test broke, and the static checks find no gaps, the agent is `CLEAN`.
 
 ## Severity guidance
 

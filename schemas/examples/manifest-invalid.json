@@ -15,5 +15,14 @@
     "agents_total": 1,
     "complete": true
   },
-  "tdd": {"enabled": true}
+  "tdd": {
+    "enabled": true,
+    "tasks": [
+      {
+        "task": "implement adder",
+        "test_files": ["tests/adder.test.js"],
+        "green_run": {"cmd": "npm test -- tests/adder.test.js", "exit": 0, "result": "INVALID", "valid_green": "nope"}
+      }
+    ]
+  }
 }
