@@ -149,7 +149,7 @@ test("docs + version reflect the TDD feature", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "1.16.0", "plugin version is current");
+  assert.equal(claude.version, "1.17.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   const readme = read("README.md");
@@ -523,6 +523,13 @@ test("skills use Codex-compatible frontmatter and portable invocations", () => {
     assert.doesNotMatch(frontmatter, /^argument-hint:/m, `${name} omits unsupported argument-hint`);
     assert.doesNotMatch(f, /\{\$ARGUMENTS\}/, `${name} does not depend on Claude argument interpolation`);
   }
+});
+
+test("pr skill is agent-only: hidden from the user slash menu", () => {
+  const pr = read("skills/pr/SKILL.md").match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+  assert.match(pr, /^user-invocable: false$/m, "pr frontmatter blocks user slash invocation");
+  const run = read("skills/run/SKILL.md").match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+  assert.doesNotMatch(run, /^user-invocable:/m, "run skill stays user-invocable");
 });
 
 test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {

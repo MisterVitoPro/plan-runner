@@ -1,5 +1,6 @@
 ---
 name: pr
+user-invocable: false
 description: >
   Internal plan-runner step (invoked by the run skill at pipeline end, not run
   directly): push the current branch and open or update a proper pull request --
