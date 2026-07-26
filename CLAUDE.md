@@ -21,7 +21,7 @@ A release touches six places, in one commit:
 3. The pinned version assertion in `tests/contract.test.js` ("docs + version reflect the ... feature")
 4. `package.json` `version`
 5. A new `CHANGELOG.md` entry (SemVer: new pipeline behavior = minor, prose/doc fix = patch)
-6. `.claude-plugin/plugin.json` `description` — update whenever the release adds or changes user-facing behavior (a pure internal fix may leave it unchanged)
+6. `.claude-plugin/plugin.json` `description` — a deliberately short marketplace blurb (~250 chars; the plugin-ecosystem median is ~150 and every browsing surface truncates past a few lines). Update it only when the core pitch changes; per-release feature detail goes in the CHANGELOG and README, never appended here. A contract test caps it at 300 chars. (Pre-1.18.0 it accumulated a clause per release and reached 4,200+ chars.)
 
 Tagging and the marketplace pin are **automated** by `.github/workflows/marketplace-pin.yml`: when a merge to `main` bumps the synchronized manifest version, it tags the merge commit `vX.Y.Z` and updates the plugin's `ref` + `sha` in both `MisterVitoPro/esper` catalogs, plus the Claude catalog description. So a normal release is just: land the six-place version-bump commit on `main` via PR — the tag and both marketplace pins follow automatically. Don't hand-tag or hand-edit the marketplace for a routine release; doing both by hand races the workflow.
 
