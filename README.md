@@ -79,6 +79,77 @@ Teams** orchestration and uses it when available:
   result is captured, wave by wave, so agents never sit idle for the rest of the
   run.
 
+## Project-agent dispatch
+
+Step 4a can serve a dev task with a target repo's own specialized agent (a
+frontend expert, a Rust expert) instead of the bundled generic `plan-dev`,
+when the repo ships one that clearly fits. This is on by default; verifier,
+test-author, and aggregator dispatches always use their bundled definitions
+regardless of what's discovered, which keeps verification independent of
+the code's author.
+
+**Discovery.** At pre-flight, plan-runner builds an in-session inventory of
+candidate agents from `.claude/agents/*.md`, `.codex/agents/*.md` (when
+present), and any additional location **explicitly named** by the repo-root
+`AGENTS.md` or `CLAUDE.md` (e.g. "our agents live in `tools/agents/`") -- a
+vague mention of "agents" with no named directory doesn't count. Each
+file's frontmatter (`name`, `description`, `tools`, `model`) is parsed; an
+absent `tools` field means the agent inherits all tools. `AGENTS.md` /
+`CLAUDE.md` are also scanned for explicit routing directives of the form
+"use agent X for Y work" -- only explicit directives count, never a passing
+mention. A malformed or unreadable agent file is skipped with a logged
+reason and never fails the run; a repo with no agent directories and no
+directives behaves exactly as before, with no warnings.
+
+**Selection**, per dev task, in order:
+1. An explicit routing directive covering the task wins outright,
+   overriding the description match below.
+2. Otherwise a project agent is selected only when its `description`
+   **clearly covers** the task's domain -- the bar is deliberately high,
+   and any doubt (two plausible agents, or a fit resting on a generic word
+   like "code" or "files") selects none.
+3. Otherwise the task falls back to the bundled `plan-dev`.
+
+**Tool guard.** A selected project agent whose `tools` frontmatter is
+present and lists neither `Write` nor `Edit` is disqualified -- plan-runner
+never widens its declared tools to make it eligible; it dispatches bundled
+`plan-dev` instead and logs the disqualification.
+
+**Model precedence.** A serving project agent's `model:` frontmatter wins;
+when it declares none, the task's `recommended_model` applies. A bundled
+`plan-dev` dispatch always uses `recommended_model`.
+
+**The per-invocation contract always wins.** Whichever definition serves a
+dispatch, the Dev Return Contract (return JSON shape, status enum,
+owned-files rules, no-git-commit rule, token self-report) and the
+per-invocation prompt are appended after it and declared overriding --
+including the agent's own output format, status vocabulary, writable-file
+scope, or any instruction to commit its own work. A project agent's return
+is additionally validated against `schemas/dev-return.schema.json`; a
+failure gets one re-prompt with the schema alone, and a second failure
+records a bug and pins that task to bundled `plan-dev` for the next cycle,
+without ever fabricating a return field.
+
+**Provenance.** Each dispatch prints a `served by <plan-dev (bundled) |
+<name> (project)>` line at the Step 4a dispatch point, and records
+`agent_source` (`"bundled"` or `"project:<name>"`) in that wave's manifest
+entry, the Run Report's `Served by:` line, and the PR body's provenance
+stat (omitted entirely when a manifest predates the field, never inferred).
+
+**Flags:**
+- `--no-project-agents` -- disable project-agent dispatch for this run;
+  every dispatch uses bundled definitions, byte-identical to pre-feature
+  behavior. This is the project-agent kill switch.
+- Persistently via `.plan-runner.yml`:
+
+  ```yaml
+  agents:
+    project: true   # default true; false = bundled-only, same effect as --no-project-agents
+  ```
+
+- Precedence: `--no-project-agents` flag > `.plan-runner.yml`
+  `agents.project` > default (`true`), the same pattern as `--verify`.
+
 ## Token accounting
 
 plan-runner tallies the tokens consumed by every subagent it dispatches -- the

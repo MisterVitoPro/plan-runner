@@ -42,7 +42,8 @@
                 "dev_status": {"type": "string"},
                 "verifier_status": {"type": "string"},
                 "bug_count": {"type": "integer"},
-                "tokens": {"$ref": "#/$defs/tokenCount"}
+                "tokens": {"$ref": "#/$defs/tokenCount"},
+                "agent_source": {"type": "string", "pattern": "^(bundled|project:.+)$", "description": "Provenance of the dev agent dispatched for this task: 'bundled' for the built-in plan-dev role, or 'project:<name>' for a project-defined agent selected by the dispatch overlay. Optional for back-compat with manifests written before 1.19.0, which carry no agent_source (dispatch was always bundled)."}
               }
             }
           },
