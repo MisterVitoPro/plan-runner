@@ -35,7 +35,8 @@
                 "role": {"type": "string", "enum": ["test-author", "impl", "standalone"], "description": "TDD role. Omitted on classic (non-TDD) runs."},
                 "testable": {"type": "boolean", "description": "TDD mode only. True for test-author/impl agents, false for non-testable standalone tasks."},
                 "non_testable_reason": {"type": "string", "description": "TDD mode only. One-line reason a standalone task was classified non-testable."},
-                "tests_to_satisfy": {"type": "array", "items": {"type": "string"}, "description": "impl role only. Test files (from the paired test-author) the implementation must make pass."}
+                "tests_to_satisfy": {"type": "array", "items": {"type": "string"}, "description": "impl role only. Test files (from the paired test-author) the implementation must make pass."},
+                "inline_tests": {"type": "boolean", "description": "test-author role only. True when the task's unit tests must live inside the implementation file itself (e.g. a [[bin]]-style target whose internals are unreachable from an external test file). Exempts exactly one shared file from the Step 2 test-author/impl owned_files disjointness check. Optional -- wave plans written before this field existed (pre-1.18.0) omit it, which means false."}
               }
             }
           }
