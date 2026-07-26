@@ -30,7 +30,9 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          allowed = {'name', 'description', 'allowed-tools', 'license', 'metadata'}
+          # user-invocable is Claude-only (hides the slash command from humans);
+          # Codex ignores unknown frontmatter keys, so it degrades to visible-but-internal there.
+          allowed = {'name', 'description', 'allowed-tools', 'license', 'metadata', 'user-invocable'}
           for skill in Path('skills').glob('*/SKILL.md'):
               text = skill.read_text()
               assert text.startswith('---\n'), f'{skill}: missing frontmatter'

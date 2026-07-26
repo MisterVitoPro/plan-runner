@@ -2,6 +2,15 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.17.0 - 2026-07-26
+
+- **The pr skill is now agent-only.** `skills/pr/SKILL.md` declares `user-invocable: false`, so humans can no longer run `/plan-runner:pr` from the slash-command menu; the skill remains invocable by the model (the run skill's final step, or a direct Skill-tool call). It was always documented as an internal pipeline step -- this makes that structural. On Codex the key is ignored (unknown frontmatter keys are tolerated), so the skill stays visible there but keeps its "not run directly" description; the CI frontmatter allowlist admits `user-invocable` deliberately.
+- Repairs the 1.16.1 release bookkeeping: that version bumped only the two plugin manifests, leaving the contract-test version pin, `package.json`, and this changelog behind (breaking `node --test` on main). All version surfaces are re-synchronized at 1.17.0.
+
+## 1.16.1 - 2026-07-24
+
+- Marketplace rebrand: the catalog repo `qa-claude-market` was renamed to `esper`; `marketplace-pin.yml`, `CLAUDE.md`, and `README.md` now point at the new repo. (Entry added retroactively in 1.17.0 -- this release shipped without a changelog entry.)
+
 ## 1.16.0 - 2026-07-23
 
 - **Late-verdict reconciliation.** An expired bounded wait for a wave verifier no longer permanently closes that wave against a verdict that shows up afterward. A verifier report arriving after its wave was already recorded `UNVERIFIABLE` or superseded by a replacement verifier is now reconciled by union of findings, and a later or replacement `CLEAN` can never erase an earlier `BUGS_FOUND`. Any aggregation, fix-plan, or PR artifacts already produced before the late verdict landed are revised to match -- including returning a PR to draft if it had already been published ready on a now-false zero-bug claim. This is what stops a wave's real verdict from being lost when a merely slow verifier gets mistaken for a dead one.
