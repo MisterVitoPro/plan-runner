@@ -82,6 +82,19 @@ test("SKILL runs per-agent red/green gates, routes bugs, records evidence", () =
   assert.match(f, /tdd\.tasks|red_run|green_run/i, "writes red/green evidence to the manifest");
 });
 
+test("Step 2 validation resolves every tests_to_satisfy path (no vacuous green from invented paths)", () => {
+  const f = read("skills/run/SKILL.md");
+  // every impl tests_to_satisfy path must exist on disk OR be authored by an earlier-wave test-author
+  assert.match(f, /every path in `tests_to_satisfy` MUST either \(a\) exist on disk/i, "case (a): path exists on disk");
+  assert.match(f, /`owned_files` of a `test-author` agent in an EARLIER wave/i, "case (b): authored by an earlier-wave test-author");
+  // the failure is a hard validation STOP that names the offender
+  assert.match(f, /naming the impl agent and each unresolvable path/i, "STOP names the agent and the unresolvable path");
+  // the rationale pins the failure mode being prevented
+  assert.match(f, /match zero tests, exit 0, and record a vacuous `PASSED`/, "records the vacuous-green failure mode");
+  // both TDD first runs and fix-plan re-runs are covered
+  assert.match(f, /first-run TDD cycle[\s\S]{0,120}fix-plan re-run/i, "explains why both cases are needed");
+});
+
 test("SKILL Step 4a dispatches agents by role (test-author vs impl)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /\.\.\/\.\.\/agents\/plan-test-author\.md/, "Step 4 must load the bundled plan-test-author role");
