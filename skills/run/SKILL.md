@@ -20,7 +20,7 @@ Follow this pipeline exactly. Do not skip steps.
 
 ## Argument parsing
 
-**Internal phase-runner form (relay only).** If the invocation input begins with `--phase-runner <run-state path> --phase <P>`, this is not a normal run: a relay driver dispatched you (Step 3-bis.2) to execute one phase in a fresh context. Capture `run_state_path = <run-state path>` and `phase_runner_id = <P>`, set `is_phase_runner = true`, and do NOT tokenize for a plan path or parse any other flag -- skip pre-flight, analysis, and slicing (all state is already on disk) and jump straight to Step 3-bis.0, which loads everything else from the run-state. For every other invocation set `is_phase_runner = false` and continue below.
+**Internal phase-runner form (relay only).** If the invocation input begins with `--phase-runner <run-state path> --phase <P>`, this is not a normal run: a relay driver dispatched you (Step 3-bis.2) to execute one phase in a fresh context. Capture `run_state_path = <run-state path>` and `phase_runner_id = <P>`, set `is_phase_runner = true`, and do NOT tokenize for a plan path or parse any other flag except `--no-project-agents` -- skip pre-flight, analysis, and slicing (all state is already on disk) and jump straight to Step 3-bis.0, which loads everything else from the run-state. `--no-project-agents` is the one flag this form accepts, because project-agent dispatch is in-session state that `run-state.json` does not carry: the relay driver re-appends it when the parent run was invoked with it (Step 3-bis.2), and a phase runner that receives it sets `no_project_agents_flag = true` before Step 3-bis.0 rebuilds the inventory. For every other invocation set `is_phase_runner = false` and continue below.
 
 Tokenize the skill invocation input on whitespace. The first non-flag token is the plan path (except for a `--resume` invocation, which carries no plan path -- state comes from the run-state; see the `--resume` flag below). Flags:
 - `--verbose` -- if present, the analyzer emits per-wave `rationale` and per-agent `complexity_signals`. If absent, those fields are omitted (default; smaller analyzer output).
@@ -31,9 +31,10 @@ Tokenize the skill invocation input on whitespace. The first non-flag token is t
 - `--phase-size <N>` -- optional integer overriding `phasing.max_waves_per_phase` (the max consecutive waves per phase). Overrides `.plan-runner.yml`. Capture its value as `phase_size_flag` (unset if the flag is absent).
 - `--phase-mode <relay|stop>` -- optional phase execution mode overriding `phasing.mode`. Overrides `.plan-runner.yml`. Capture its value as `phase_mode_flag` (unset if the flag is absent).
 - `--no-phasing` -- if present, disable phasing entirely and run the whole plan in one single-session pipeline regardless of plan size or yml config. This is the rollback kill-switch that restores today's behavior. Set `no_phasing_flag = true`.
+- `--no-project-agents` -- if present, disable project-agent dispatch for this run: every pipeline role is served by its bundled definition, exactly as before the feature existed. Overrides `.plan-runner.yml` `agents.project`. This is the project-agent kill-switch. Set `no_project_agents_flag = true`.
 - `--resume [run-state path]` -- resume an interrupted phased run from its last completed wave. With a path argument, resume that specific `run-state.json`. Bare (no path), auto-detect the most recent incomplete run-state under the resolved `docs_base`'s `plan-runner/` tree (plus the legacy `docs/plan-runner/` when `docs_base` differs from `docs`; see R.1). A `--resume` invocation carries NO plan path -- everything is read from the run-state. Set `resume_flag = true`; if the token immediately following `--resume` exists and is not itself a flag, capture it as `resume_path` and consume it (it is the run-state path, never the plan path); otherwise leave `resume_path` unset.
 
-Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Set `sync_verify_flag = true` if `--sync-verify` is present, otherwise `sync_verify_flag = false`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--sync-verify`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
+Set `verbose = true | false` based on the flag. Capture any `--test-cmd` value as `test_cmd_flag`. Set `tdd_enabled = false` if `--no-tdd` is present, otherwise `tdd_enabled = true` (TDD is auto-enabled by default -- never prompt for it). Capture any `--verify` value as `verify_mode_flag`. Set `sync_verify_flag = true` if `--sync-verify` is present, otherwise `sync_verify_flag = false`. Capture any `--phase-size` value as `phase_size_flag` and any `--phase-mode` value as `phase_mode_flag`. Set `no_phasing_flag = true` if `--no-phasing` is present, otherwise `no_phasing_flag = false`. Set `no_project_agents_flag = true` if `--no-project-agents` is present, otherwise `no_project_agents_flag = false`. Set `resume_flag = true` if `--resume` is present, otherwise `resume_flag = false`, and capture its optional path token as `resume_path` (see the flag above). Strip all flags (including `--verify <mode>`, `--sync-verify`, `--phase-size <N>`, `--phase-mode <mode>`, `--no-phasing`, `--no-project-agents`, and `--resume [path]` together with any consumed `resume_path` token) before using the plan path. On a `--resume` invocation there is no remaining plan-path token, and that is expected -- do not treat its absence as the "plan file not found" error.
 
 ## Timing
 
@@ -77,12 +78,13 @@ Clean run:
   plan-runner cycle 1 -- COMPLETE (clean, no bugs found)
 ============================================================
   Waves        7               Duration     4m 12s
-  Dev agents   8               Tokens       381,852
+  Dev agents   8 (2 project)   Tokens       381,852
   Verifiers    7/7 per-wave    Coverage     12/13 agents
   Commits      7               Bugs         0
 
   ! Tokens are a lower bound -- 1 of 13 subagents did not
     report usage.
+  Served by: plan-dev (bundled) 6, frontend-expert (project) 2
 ------------------------------------------------------------
 Tokens by phase
 ------------------------------------------------------------
@@ -122,6 +124,7 @@ Rendering rules:
 - **Honesty lines** (each prefixed `! `) print directly under the stat header, above the tables, and only when they apply:
   - partial token coverage -- printed only when `token_usage.complete` is false; the totals are a lower bound. Wrap at the 60-column width with a two-space hanging indent.
   - unverified waves -- printed only when `verification.waves_skipped > 0`.
+- **Dispatch provenance.** `Dev agents` counts every dev agent dispatched; when at least one was served by a project agent, append ` (<n> project)` to that value and print one `Served by:` line under the honesty lines, tallying each serving definition from the manifest `agent_source` values: `Served by: plan-dev (bundled) <n>, <name> (project) <n>, ...`. When every dispatch was `bundled` -- the feature disabled, or an empty inventory -- omit both the suffix and the `Served by:` line, so the report is byte-identical to pre-feature output.
 - **Tokens by phase** table: group `by_agent` entries by `phase` (`analyze` -> Analyze, `wave` -> Dev, `verify` -> Verify, `aggregate` -> Aggregate); omit a phase row entirely when no subagent was dispatched in that phase (e.g. Aggregate on a zero-bug run). `Agents` = subagents dispatched in the phase; `Reported` = how many surfaced a usage figure. Input / Output / Total are sums of the **non-null** values only, with thousands separators; print `n/a` for a cell where nothing in that phase reported a figure. Never fabricate a number. The `Total` row's Total cell equals `token_usage.total_tokens`. `Top consumers` lists up to 3 agents with the largest non-null `total`, formatted `<agent> (<total>)`; omit the line when no agent reported. The coverage figure is not repeated here -- it lives once, in the stat header.
 - **Timing by phase** table lists each phase's elapsed time as `Xm Ys`: Pre-flight, Analyze plan, Wave execution (annotated `(<W> waves)`), Aggregation (omit the row on a zero-bug run, where no aggregator ran), Sync code atlas (mark skipped when git is absent or code-atlas is not present), Open PR (mark skipped when git is absent), and a `Total`. `User confirm` is excluded from the total.
 - **Artifacts** always lists `Manifest`; it adds `Bug report` and `Fix plan` rows only when `total_bugs > 0`.
@@ -382,6 +385,49 @@ When `phasing_enabled` is false, print instead:
 
 Store `phasing_enabled`, `max_waves_per_phase`, `phase_mode`, `auto_stop_phases`, and `relay_max_minutes` for Step 2-bis (slicing) and for the run-state checkpoint.
 
+### 1d-sexies. Resolve project-agent dispatch and build the agent inventory
+
+A target repo may ship its own specialized agents (a frontend expert, a Rust expert) that implement a dev task better than the generic bundled `plan-dev`. Resolve whether to use them, then build the inventory Step 4a selects from.
+
+**Resolve the setting** in precedence order **flag > yml > default**, the same precedence pattern as `--verify` / `verification.mode`:
+
+1. `project_agents_enabled = false` if `no_project_agents_flag` is true (the `--no-project-agents` kill-switch wins over everything).
+2. Otherwise, if a `.plan-runner.yml` file exists at the repo root, read it with the Read tool and use its `agents.project` value. Extract that single key directly -- do NOT depend on a YAML parser being installed, exactly as Step 1d-quater extracts `verification.mode`. A missing file, a missing `agents.project` key, or an unreadable file falls through to the next step.
+3. Otherwise default to `true` -- the feature is on by default.
+
+Print the resolved setting and its source:
+
+    Project-agent dispatch: <enabled|disabled> (from <--no-project-agents flag | .plan-runner.yml | default>).
+
+**When `project_agents_enabled` is false, skip discovery entirely:** set `agent_inventory = []` and `routing_directives = []`, scan nothing, and print no further lines. Step 4a then uses only bundled role definitions and its dispatch is byte-identical to pre-feature behavior. Proceed to Step 1e.
+
+**Otherwise build the inventory** (in-session state; see the note at the end of this step):
+
+1. **Collect candidate agent files** from these locations, in this order, using Glob:
+   - `.claude/agents/*.md`
+   - `.codex/agents/*.md`, when that directory is present
+   - any additional agent-file location **explicitly named** by the target repo's `AGENTS.md` or `CLAUDE.md` (e.g. "our agents live in `tools/agents/`"), globbed the same way. A vague mention of "agents" that names no directory does not count.
+
+   A missing directory contributes no entries and is not an error. Deduplicate by resolved path.
+
+2. **Parse each file's frontmatter** and record one inventory entry: `{name, description, tools, model, path}` plus the file's markdown body (kept in session for prompt assembly in Step 4a). `name` falls back to the file's basename without its extension when the frontmatter omits it. **An absent `tools` field means the agent inherits all tools** -- record `tools: null` and treat it as write-capable for the Step 4a tool guard; an explicit `tools` list is recorded verbatim and never widened.
+
+3. **Malformed files are skipped, never fatal.** If a candidate file is unreadable, has no frontmatter, or its frontmatter cannot be parsed, exclude it from the inventory and log one line, then continue with the remaining files:
+
+       Agent inventory: skipped <path> (<unreadable | no frontmatter | unparseable frontmatter: ...>).
+
+   Discovery failures never fail the pipeline.
+
+4. **Collect routing directives** from the repo-root `AGENTS.md` and `CLAUDE.md`: sentences that **explicitly** route work to a named agent, of the form "use agent X for Y work". Record each as `{agent_name, applies_to}`. Only explicit directives count -- a doc that merely mentions an agent's existence, or names work with no agent, produces no directive. A directive naming an agent that is not in the inventory (unreadable, skipped, or absent) is dropped with a logged reason.
+
+5. **Print the inventory summary**, once:
+
+       Agent inventory: <n> project agents discovered (<comma-joined names>), <m> routing directives.
+
+   **An empty inventory with no routing directives prints nothing at all** and yields exactly today's behavior -- a repo with no agent directories and no directives must see no warnings.
+
+The inventory and directives are **in-session state only**: no cycle artifact is written, no schema carries them, and `run-state.json` does not persist them. A resumed session (Resume step R.3) and a relay phase runner (Step 3-bis.0) each rebuild them by re-running this step, so a mid-run edit to an agent file may be picked up on the rebuild. The inventory feeds dev-agent selection in Step 4a and nothing else: the analyzer, test-author, verifier, and aggregator dispatches always use their bundled definitions regardless of what it contains.
+
 (The output base and its source were already printed in Step 1a-minus, immediately after `docs_base` resolved and unconditionally of everything that follows it -- including the clean-tree prompt, missing test command, and verify-mode validation checks that can each STOP the pipeline before this step is reached. Nothing further to print here.)
 
 ### 1e. Initialize manifest
@@ -618,7 +664,7 @@ Otherwise `phasing_active` is true -- continue.
 
 Reached when THIS invocation is a relay phase-runner -- `is_phase_runner` is true because a driver dispatched you with the internal input `--phase-runner <run-state path> --phase <P>` (Step 3-bis.2). You are NOT the driver: do not slice, do not resolve modes, do not aggregate, do not run any terminal step.
 
-1. Read `run_state_path`. Derive `cycle_dir` = the **parent directory of `run_state_path`** (the run-state lives at the cycle root), so Step 4f's `$cycle_dir/run-state.json` rewrite has `cycle_dir` defined even though this relay phase-runner skipped Steps 1/2 where a fresh run computes it. The run-state already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt).
+1. Read `run_state_path`. Derive `cycle_dir` = the **parent directory of `run_state_path`** (the run-state lives at the cycle root), so Step 4f's `$cycle_dir/run-state.json` rewrite has `cycle_dir` defined even though this relay phase-runner skipped Steps 1/2 where a fresh run computes it. The run-state already holds the sliced phase list, `backend`, `verify_mode`, `tdd_enabled`, and each phase's directory (Step 2-bis wrote it). Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, and phase `phase_runner_id`'s global wave range from it. Resolve the test command / green baseline from the run-state's TDD state exactly as a driver would (do not re-prompt). Then **re-resolve `project_agents_enabled` and rebuild the agent inventory by running Step 1d-sexies** -- the inventory is in-session state that the run-state does not carry, so a phase runner that skipped Step 1 must rebuild it or its waves would all dispatch bundled. `no_project_agents_flag` is true here only when the driver re-appended `--no-project-agents` to this invocation; otherwise the yml key or the default decides.
 2. Read that phase's wave-plan slice from `<phase_dir>/wave-plan.json`.
 3. Execute Step 4 over this phase's wave range only, **beginning at the phase's first incomplete wave** -- `max(phase first wave, this phase's run-state `last_completed_wave` + 1)`. On a freshly-dispatched (pending) phase `last_completed_wave` is null, so it starts at the phase's first wave; on a resumed phase whose runner was re-dispatched mid-phase it starts just past the last completed wave, re-running no completed wave. The full per-wave barrier, gates, commit, pipelined verification, bug JSON, dashboard, teardown, and per-wave manifest + run-state updates run unchanged; every per-wave artifact resolves against `phase_dir` (Step 4 already targets `phase_dir`). All per-wave invariants (max 6 agents, file-disjoint, no-self-verify, verifier-coverage) hold inside the phase runner exactly as in an unphased session.
 4. When the phase's last wave finishes and the Step 4g drain has captured every outstanding verdict, **finalize and persist this phase's own scoped token tally before returning.** Compute `total_tokens`, `agents_reported`, `agents_total`, and `complete` over this phase-runner session's in-memory `token_usage.by_agent` (the dev agents and verifiers this phase dispatched) using the **same computation as Step 5.1's tally finalization**, and write that finalized `token_usage` object -- its `by_agent` array plus the four rolled-up fields -- to the top level of this phase's `$phase_dir/manifest.json`. This is what lets Step 5.2's cross-phase union read a real top-level `token_usage` from **every** phase manifest, not just the terminal phase's. Then do NOT continue to Step 5, Step 6, or any terminal step. Return exactly one distilled **phase-summary JSON** and end. The driver owns everything after the phase.
@@ -674,7 +720,7 @@ You are executing the Plan Runner run skill as a phase runner in a fresh session
 
 Read the complete skill instructions at <absolute path to this run SKILL.md>.
 Treat them as the active instructions and execute them with this invocation input:
-  --phase-runner <absolute run-state path> --phase <P>
+  --phase-runner <absolute run-state path> --phase <P><append " --no-project-agents" when no_project_agents_flag is true>
 
 Everything else -- the wave-plan slice, verify mode, backend, TDD state, phase
 directory -- is already on disk in the run-state and the phase directory. Read it fresh.
@@ -783,7 +829,7 @@ Derive every resumed variable from the run-state and its location, so nothing de
 
 - `cycle_dir` = the parent directory of `run_state_path` (the run-state lives at the cycle root). Each phase's `directory` is recorded absolutely in the run-state; do NOT recompute cycle numbering or re-derive any path from Step 1 variables.
 - `backend`, `verify_mode`, `tdd_enabled`, and `phase_mode` = the values recorded in the run-state. Set `phasing_active = true` (a run-state exists only for a phased run) and `phase_count` = the number of entries in `phases`.
-- Re-detect host facilities that are not persisted: `git_available` per Step 1b-bis and `context7_available` per Step 1d. Re-resolve `max_waves_per_phase`, `auto_stop_phases`, and `relay_max_minutes` from `.plan-runner.yml` per Step 1d-quinquies (the phase list is already sliced, so these only feed the relay guardrail and the adaptive re-resolution in Step 3-bis.1).
+- Re-detect host facilities that are not persisted: `git_available` per Step 1b-bis and `context7_available` per Step 1d. Re-resolve `project_agents_enabled` and rebuild `agent_inventory` / `routing_directives` per Step 1d-sexies -- also not persisted. The `--no-project-agents` flag is not recorded in the run-state, so repeat it on the resume invocation (or set `agents.project: false` in `.plan-runner.yml`) to keep the opt-out across a resume. Re-resolve `max_waves_per_phase`, `auto_stop_phases`, and `relay_max_minutes` from `.plan-runner.yml` per Step 1d-quinquies (the phase list is already sliced, so these only feed the relay guardrail and the adaptive re-resolution in Step 3-bis.1).
 - If `tdd_enabled`, re-resolve the **test command** by Step 1d-bis's detection path; do NOT re-prompt on resume. If detection cannot resolve a command non-interactively, proceed exactly as the relay phase-runner does (Step 3-bis.0) and let the missing gate surface through the normal loop. **Defer the green-baseline capture to R.6** -- do NOT capture it here. R.6's dirty-tree stash/keep decision can still change the working tree the resumed wave re-runs over, so a baseline captured now would bake in a pre-stash tree or one still tainted by the interrupted wave's partial breakage.
 - Record `t_start = $(date +%s)` for this resumed session (the relay guardrail clock restarts per session, Step 3-bis.4).
 
@@ -868,7 +914,32 @@ Record `t_wave_<W>_start = $(date +%s)`. If `git_available` is true, also record
 - `role: "impl"` -> read `../../agents/plan-dev.md`; include a `TESTS TO SATISFY` block listing the agent's `tests_to_satisfy`.
 - `role: "standalone"` or no role (classic) -> read `../../agents/plan-dev.md` with no `TESTS TO SATISFY` block.
 
-Common per-invocation prompt template (prepend the complete bundled role definition):
+**Project-agent selection (dev tasks only).** For each agent in this wave whose role is `impl`, `standalone`, or absent (classic), decide which definition serves its dispatch. Skip selection entirely and set `agent_source = "bundled"` when `project_agents_enabled` is false (Step 1d-sexies), when `agent_inventory` is empty, or when the wave-plan `role` is `test-author`. **Test-author, verifier, and aggregator dispatches always use their bundled definitions, regardless of the inventory** -- the verifier (4c) and aggregator (Step 5) never consult it at all, which is what keeps verification independent of the code's author.
+
+Apply these rules in order and stop at the first that resolves:
+
+0. **Pinned to bundled.** If this task is pinned to bundled `plan-dev` -- its title is in the in-session `bundled_pins` set (set by the return-contract validation below), or its task prose / acceptance criteria say to dispatch it with the bundled `plan-dev` -- select none, before any rule below is considered.
+1. **Explicit routing directive wins.** If a `routing_directives` entry's `applies_to` covers this task (the work it describes matches the task's title, its `owned_files`, or its acceptance criteria), select that entry's `agent_name`. An explicit "use agent X for Y work" directive in AGENTS.md or CLAUDE.md **overrides the conservative description match** below -- the repo's own docs are a stronger signal than any inference from a description.
+2. **Conservative description match.** Otherwise select a project agent whose `description` **clearly covers** the task's domain: the description names the technology, layer, or file type this task works in. The bar is deliberately high -- **any doubt selects none.** If two agents plausibly fit, if the fit rests on a generic word ("code", "files", "implementation"), or if the match is anything short of clear, select none.
+3. **Bundled fallback.** Otherwise select none: the task is served by the bundled `plan-dev.md` loaded above.
+
+**Tool guard.** A selected project agent whose `tools` frontmatter is present and lists **neither `Write` nor `Edit`** cannot write files, so it is disqualified: log the disqualification and dispatch bundled `plan-dev` instead. **Never widen a project agent's declared tools to make it eligible** -- dispatch it with exactly the tools its own frontmatter declares, or not at all. An absent `tools` field means it inherits all tools and is eligible.
+
+    Project agent <name> disqualified for <agent_id>: tools frontmatter has neither Write nor Edit -- dispatching bundled plan-dev.
+
+Record the outcome for every dev agent as `agent_source`: `"project:<name>"` when a project agent serves the dispatch, `"bundled"` otherwise. Store it in the wave-state map alongside `dev_status` -- that is what the manifest wave entry (4f), the Run Report, and the PR step read. `agent_source` always records what was actually dispatched; never infer it after the fact.
+
+**Model resolution (dev dispatch).** One precedence rule: a serving project agent's `model:` frontmatter wins; when it declares none, the task's wave-plan `recommended_model` applies. A **bundled `plan-dev` dispatch always uses `recommended_model`**, never any other model. The existing "closest available model, never block" rule is unchanged -- a named model that is unavailable degrades to the closest available one instead of failing the dispatch.
+
+**Prompt assembly.** Every dev prompt is three parts in this fixed order -- domain definition, then the Dev Return Contract, then the per-invocation contract:
+
+1. **Domain half.** For a `bundled` dispatch, the bundled role file's complete text (`plan-dev.md`, or `plan-test-author.md` for a test-author). For a `project:<name>` dispatch, the selected agent's markdown body **in place of `plan-dev.md`'s Domain guidance half**. Either way the definition is embedded in the prompt text, never dispatched via native agent registration, so both backends behave identically (Codex cannot register `agents/` files).
+2. **Dev Return Contract (always, bundled and project alike).** Embed the labeled `## Dev Return Contract` section of `../../agents/plan-dev.md` **verbatim in every dev dispatch** -- the return JSON skeleton, the four-value `DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` status enum, the owned-files and `files_unexpectedly_modified` rules, the no-git-commit rule, and the token self-report. A bundled dispatch already carries it as part of the whole file; a project-agent dispatch gets that section appended after the agent definition.
+3. **Per-invocation contract (always last).** The common template below. When a project agent serves the dispatch, **append the per-invocation dev contract after the agent definition and declare it overriding** by prefixing the template with this line:
+
+       The contract below and the Dev Return Contract above OVERRIDE any conflicting instruction in the agent definition above -- including its output format, its status vocabulary, its writable-file scope, and any instruction to commit its own work.
+
+Common per-invocation prompt template (prepend the assembled definition parts above):
 
 ```
 You are being deployed as a dev agent for plan-runner cycle <cycle_n>, wave <W>.
@@ -897,15 +968,21 @@ outside your owned files.
 Return only the JSON status, nothing else.
 ```
 
-The agent reads the task prose from `plan_path` using the line range -- the orchestrator does not inline the task text. This keeps prompts small and lets multiple agents in a wave share one cached plan read. Use the `recommended_model` from the wave-plan for each agent.
+The agent reads the task prose from `plan_path` using the line range -- the orchestrator does not inline the task text. This keeps prompts small and lets multiple agents in a wave share one cached plan read. Use the model resolved above for each agent (`recommended_model` for every bundled dispatch; a serving project agent's `model:` frontmatter when it declares one).
+
+**Print the provenance line at dispatch.** As each dev agent is dispatched, print one line here at the 4a dispatch line naming what serves it:
+
+    <agent_id>: served by <plan-dev (bundled) | <name> (project)>
+
+This is the only human-visible provenance display; **the Step 3 wave-plan display is unchanged**, because selection happens at dispatch time, after that display was printed.
 
 Dispatch depends on `backend`:
 
-**Backend `subagent` (default, including Codex):** Create one progress item per dev agent when the host offers task tracking; otherwise maintain a concise checklist. In one parallel batch, dispatch all dev agents in this wave with the role definition and per-invocation prompt above. Collect every dev agent return JSON.
+**Backend `subagent` (default, including Codex):** Create one progress item per dev agent when the host offers task tracking; otherwise maintain a concise checklist. In one parallel batch, dispatch all dev agents in this wave with the assembled prompt above (domain half + Dev Return Contract + per-invocation contract) at each agent's resolved model. Collect every dev agent return JSON.
 
 **Backend `teams`:** The session is the team lead.
 1. Create one task on the shared team task list per wave-plan agent, embedding the per-invocation prompt parameters (agent_id, task_title, plan_path, task_excerpt_lines, owned files, acceptance criteria, role-specific blocks) in the task detail. Give the wave's tasks no unmet dependencies so they are all immediately claimable (cross-wave ordering is enforced by the lead opening one wave at a time, not by global DAG edges).
-2. Spawn one teammate per task (honor the <=6-per-wave cap), each receiving the role-selected bundled definition and using the role's `recommended_model` when available. Teammates self-claim the wave's tasks.
+2. Spawn one teammate per task (honor the <=6-per-wave cap), each receiving the same assembled definition as the subagent backend -- the serving domain half (bundled role file or the selected project agent's body), the Dev Return Contract, and the overriding per-invocation contract -- at the model resolved above. Selection and embedding are identical on both backends. Teammates self-claim the wave's tasks.
 3. Read teammate progress from the task list / mailbox -- do NOT pull full JSON returns into the lead context until an agent's return is being captured. Each teammate's durable return is its `return_file` (`$phase_dir/returns/wave-<W>-<agent_id>.json`, from its dispatch prompt): poll for that file's existence within the wave barrier's bounded wait and read the final JSON status from it. The task result / mailbox message is a convenience preview only -- never depend on retrieving it for correctness: `TaskOutput` cannot resolve a named background agent, and a `SendMessage` "resend your final JSON" request races the teammate's idle teardown and can go permanently unanswered. A return file that fails to parse may be a write caught mid-flight; re-read it once after a short pause before treating it as absent.
 
 For each dev agent return (both backends):
@@ -913,6 +990,17 @@ For each dev agent return (both backends):
 2. Update the corresponding progress item or fallback checklist entry to `completed`.
 3. Record the dev_status in a wave-state map.
 4. Capture the agent's token usage (see **Token accounting**) and store it in the wave-state map keyed by `agent_id`. Append it to `token_usage.by_agent` as `{"agent": "<agent_id>", "phase": "wave", ...}`: harness completion usage first; when it is absent -- common for teammates on the `teams` backend -- fall back to the `token_usage` self-report in the agent's return JSON; record `tokens: null` only when both are missing.
+
+**Return-contract validation (project-agent dispatches).** A dispatch whose `agent_source` is `project:<name>` was served by a definition plan-runner does not control, so validate its parsed return against `../../schemas/dev-return.schema.json` (resolved relative to this skill; use Python+jsonschema when available, otherwise a structural check: required fields present, `status` one of the four enum values, array fields are arrays) before accepting it. A bundled dispatch is not re-validated -- its role file is the contract. On a validation failure do NOT classify the agent `BLOCKED` and do NOT fill in, guess, or repair any field:
+
+1. **Re-prompt that agent once, with the schema alone.** Continue its existing session (`SendMessage` to its returned agent id -- do not dispatch a fresh agent): "Your return did not validate against dev-return.schema.json. Return ONLY a single JSON object matching this schema, with no prose before or after, and write it verbatim to your return_file: `<schema text>`". Then re-read its `return_file` and re-validate.
+2. **If the second return also fails,** record the dispatch exactly as it came back, keep its `agent_source`, and add one `return_contract_violation` bug to this wave's bug JSON (4d), carrying the dispatch's `agent_source` in its evidence:
+
+```json
+{"bug_id": "wave-<W>-bug-<n>", "severity": "P2", "category": "return_contract_violation", "title": "Project agent <name> return failed dev-return.schema.json twice", "file": "<agent's owned_files[0] or 'n/a'>", "line": null, "evidence": "agent_source: project:<name>; validation error: <the validator's message, truncated>", "expected": "A dev return matching dev-return.schema.json", "suggested_fix": "Dispatch task '<task_title>' with the bundled plan-dev next cycle; the project agent does not honor the Dev Return Contract."}
+```
+
+   Then **pin that task to bundled `plan-dev` for the next cycle**: add its `task_title` to the in-session `bundled_pins` set (selection rule 0 above, which also covers any re-dispatch later in this cycle) and state the pin in the bug's `suggested_fix`, so the aggregator carries it into `fix-plan.md` and the re-run dispatches the task bundled. **Never fabricate a return field to make a return validate** -- missing fields stay missing, `token_usage` stays null when the agent reported none, and the gap flows through the normal verify -> aggregate -> fix-plan loop.
 
 **Wave barrier (both backends):** Wait for ALL dev agents/teammates in this wave to complete before proceeding. On the `teams` backend, if a task is stuck past a bounded wait (the known task-status-lag issue), check the teammate's `return_file` first -- a parked or already-gone teammate whose return file exists and parses HAS completed; capture it normally. Only when the return file is also absent read the owned-file state directly, treat the unreported teammate as `BLOCKED`, print a warning, and proceed to gates -- the gap then flows through the normal verify -> aggregate -> fix-plan loop rather than hanging the pipeline.
 
@@ -1145,7 +1233,7 @@ For a SKIPPED wave (unverified under `verify_mode`), the "Wave verifier" line pr
   "wave_id": <W>,
   "duration_seconds": <wave duration>,
   "agents": [
-    {"agent_id": "<id>", "dev_status": "<status>", "tokens": {"input": <n|null>, "output": <n|null>, "total": <n|null>}}
+    {"agent_id": "<id>", "dev_status": "<status>", "agent_source": "bundled | project:<name>", "tokens": {"input": <n|null>, "output": <n|null>, "total": <n|null>}}
   ],
   "wave_verifier_status": "<verifier_status>",
   "wave_bug_count": <total bugs in wave>,
@@ -1155,6 +1243,8 @@ For a SKIPPED wave (unverified under `verify_mode`), the "Wave verifier" line pr
   "skipped_reason": "<reason or null>"
 }
 ```
+
+Each per-agent entry's `agent_source` is the value recorded at dispatch in 4a (`"bundled"` or `"project:<name>"`) -- copied from the wave-state map, never re-derived here. This is the field the PR step reads for its provenance stat, and it is what makes a project-agent dispatch auditable after the run.
 
 The wave entry's `wave_verifier_status` may now be `SKIPPED`. Also update the top-level `verification` counters: increment `waves_verified` when this wave got a semantic verifier, or `waves_skipped` when it was SKIPPED. Ensure `verification.waves_total` is set to **this phase's own wave count** -- the number of waves in this phase's wave-plan slice, NOT the cycle-wide global `W` -- so that summing `waves_total` across the phase manifests in Step 5.2 yields exactly `W` and never `phase_count * W`. (On an unphased run the phase is the whole cycle, so this phase-scoped count is `W`, byte-for-byte the old behavior.)
 

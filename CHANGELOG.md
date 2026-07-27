@@ -2,6 +2,14 @@
 
 All notable changes to plan-runner are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 1.19.0 - 2026-07-26
+
+Project-agent dispatch: dev tasks can now be served by the target repo's own agent definitions.
+
+- **Project-agent dispatch for dev tasks.** The run skill builds an in-session inventory of project-defined agents (`.claude/agents/*.md`, `.codex/agents/*.md`, plus agent locations and explicit "use agent X for Y" routing directives named by the target repo's AGENTS.md/CLAUDE.md) and, when a dev task's domain is clearly covered by a discovered agent's description, embeds that agent's definition in the dev prompt in place of plan-dev.md's domain-guidance half -- falling back to bundled plan-dev whenever the match is doubtful. An explicit routing directive overrides the conservative description match. Agents whose `tools` frontmatter lacks both Write and Edit are disqualified with a logged reason (never widened); a selected agent's `model` frontmatter wins over the task's `recommended_model`, which remains the model for every bundled dispatch. Test-author, verifier, and aggregator dispatches always use bundled definitions regardless of inventory. `--no-project-agents` / `agents.project: false` restores byte-identical pre-feature dispatch; malformed or unreadable agent files are skipped with a logged reason, never fatal.
+- **Dev Return Contract split + return validation.** `agents/plan-dev.md` is split into labeled domain-guidance and Dev Return Contract halves; every dev dispatch (bundled or project) embeds the contract, declared to override any conflicting instruction in a project agent's definition. A project-agent return that fails `dev-return.schema.json` is re-prompted once with the schema alone; a second failure records a `return_contract_violation` bug carrying the dispatch's `agent_source` and pins the task to bundled plan-dev for the next cycle, with no return field ever fabricated.
+- **Provenance everywhere.** Each dev dispatch prints a "served by <agent>" line; `agent_source` (`"bundled"` | `"project:<name>"`) is recorded in the per-agent manifest entry (new optional `manifest.schema.json` field with valid/invalid fixtures; pre-1.19.0 manifests still validate), surfaces in the Run Report, and feeds a new PR-body "Agent sources" stat that is omitted entirely when manifests predate the field. README documents the feature surface and `docs/release-smoke.md` gains an adversarial-matching-agent case (conflicting output format, self-commit instruction) plus a malformed-agent-file skip case.
+
 ## 1.18.0 - 2026-07-26
 
 Four production-found defects fixed (issues #11, #19, #20, #21; PRs #23-#26):
