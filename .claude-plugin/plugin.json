@@ -3,7 +3,7 @@
   "displayName": "Plan Runner",
   "homepage": "https://github.com/MisterVitoPro/plan-runner",
   "description": "Run a Markdown implementation plan through parallel, file-disjoint agent waves with TDD red-green gates, independent per-wave verification, and bug-driven fix-plan re-runs, ending in a structured pull request. Works in Claude Code and Codex; git optional.",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "license": "MIT",
   "keywords": [
     "agent-orchestration",

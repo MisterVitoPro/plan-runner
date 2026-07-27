@@ -210,7 +210,7 @@ test("docs + version reflect the TDD feature", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "1.18.0", "plugin version is current");
+  assert.equal(claude.version, "1.19.0", "plugin version is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
   // the marketplace blurb stays ecosystem-length (median ~150 chars across public
