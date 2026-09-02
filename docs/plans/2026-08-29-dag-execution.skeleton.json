@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-29-dag-execution.plan.md",
+  "entries": [
+    {
+      "path": "skills/run/SKILL.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-analyzer.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/wave-plan.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/run-state.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/task-graph.schema.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/task-event.schema.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-integrator.md",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-dev.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-test-author.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-verifier.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/dev-return.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/bug-report.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "skills/pr/SKILL.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/manifest.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/manifest-valid.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/manifest-invalid.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/run-state.valid.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/run-state.invalid.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "tests/contract.test.js",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "tests/validate_schemas.py",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "test-fixtures/tiny.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "test-fixtures/medium.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "test-fixtures/large-plan.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/task-graph-valid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/task-graph-invalid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/task-event-valid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/task-event-invalid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "README.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "docs/release-smoke.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "package.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    }
+  ]
+}

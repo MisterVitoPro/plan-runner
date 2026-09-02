@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-30-local-endpoint-dispatch.plan.md",
+  "spec": "docs/specs/2026-08-30-local-endpoint-dispatch.md",
+  "paths": [
+    {
+      "path": "scripts/http-dispatch.js",
+      "owner": "local-endpoint-dispatch-t01",
+      "disposition": "create",
+      "language": "javascript",
+      "stub": true,
+      "contract": "request-spec in, response-record out; curl transport, one retry"
+    },
+    {
+      "path": "scripts/fenced-blocks.js",
+      "owner": "local-endpoint-dispatch-t01",
+      "disposition": "create",
+      "language": "javascript",
+      "stub": true,
+      "contract": "blocks + owned-file list in, written/refused paths out"
+    },
+    {
+      "path": "tests/http-dispatch.test.js",
+      "owner": "local-endpoint-dispatch-t02",
+      "disposition": "create",
+      "language": "javascript",
+      "stub": true,
+      "contract": "node --test unit coverage for the driver; never reaches the network"
+    },
+    {
+      "path": "tests/fenced-blocks.test.js",
+      "owner": "local-endpoint-dispatch-t02",
+      "disposition": "create",
+      "language": "javascript",
+      "stub": true,
+      "contract": "node --test unit coverage for the parser"
+    },
+    {
+      "path": "skills/run/SKILL.md",
+      "owner": "local-endpoint-dispatch-t03",
+      "disposition": "modify",
+      "language": "markdown",
+      "stub": false,
+      "contract": "Step 1d-septies extension and endpoint dispatch prose"
+    },
+    {
+      "path": "tests/contract.test.js",
+      "owner": "local-endpoint-dispatch-t04",
+      "disposition": "modify",
+      "language": "javascript",
+      "stub": false,
+      "contract": "pins the new prose phrases and the release version"
+    },
+    {
+      "path": "schemas/run-state.schema.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "modify",
+      "language": "json",
+      "stub": false,
+      "contract": "optional model_policy dispatch fields, back-compatible"
+    },
+    {
+      "path": "schemas/manifest.schema.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "modify",
+      "language": "json",
+      "stub": false,
+      "contract": "per-agent dispatch mechanism and http_usage token source"
+    },
+    {
+      "path": "schemas/examples/run-state-endpoint-dispatch-valid.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "create",
+      "language": "json",
+      "stub": true,
+      "contract": "see plan task local-endpoint-dispatch-t05"
+    },
+    {
+      "path": "schemas/examples/run-state-endpoint-dispatch-invalid.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "create",
+      "language": "json",
+      "stub": true,
+      "contract": "see plan task local-endpoint-dispatch-t05"
+    },
+    {
+      "path": "schemas/examples/manifest-http-usage-valid.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "create",
+      "language": "json",
+      "stub": true,
+      "contract": "see plan task local-endpoint-dispatch-t05"
+    },
+    {
+      "path": "schemas/examples/manifest-http-usage-invalid.json",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "create",
+      "language": "json",
+      "stub": true,
+      "contract": "see plan task local-endpoint-dispatch-t05"
+    },
+    {
+      "path": "tests/validate_schemas.py",
+      "owner": "local-endpoint-dispatch-t05",
+      "disposition": "modify",
+      "language": "python",
+      "stub": false,
+      "contract": "registers both halves of each new fixture pair"
+    },
+    {
+      "path": "README.md",
+      "owner": "local-endpoint-dispatch-t06",
+      "disposition": "modify",
+      "language": "markdown",
+      "stub": false,
+      "contract": "roles list, passthrough, dispatch-map line"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "owner": "local-endpoint-dispatch-t06",
+      "disposition": "modify",
+      "language": "markdown",
+      "stub": false,
+      "contract": "minor release entry"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "owner": "local-endpoint-dispatch-t06",
+      "disposition": "modify",
+      "language": "json",
+      "stub": false,
+      "contract": "synchronized version bump"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "owner": "local-endpoint-dispatch-t06",
+      "disposition": "modify",
+      "language": "json",
+      "stub": false,
+      "contract": "synchronized version bump"
+    },
+    {
+      "path": "package.json",
+      "owner": "local-endpoint-dispatch-t06",
+      "disposition": "modify",
+      "language": "json",
+      "stub": false,
+      "contract": "synchronized version bump"
+    }
+  ]
+}

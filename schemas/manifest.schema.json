@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manifest.schema.json",
+  "title": "Pipeline Manifest",
+  "type": "object",
+  "required": ["cycle", "input_plan", "started_at", "context7_available", "waves", "total_bugs"],
+  "properties": {
+    "cycle": {"type": "integer", "minimum": 1},
+    "input_plan": {"type": "string"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": ["string", "null"], "format": "date-time"},
+    "context7_available": {"type": "boolean"},
+    "git_available": {"type": "boolean", "description": "Whether git was available at pre-flight (git binary present AND inside a work tree). When false, all git operations are skipped: clean-tree check, per-wave commits, and the PR step. Optional for back-compat with manifests written before 1.3.0."},
+    "backend": {"type": "string", "enum": ["teams", "subagent"], "description": "Wave-execution backend selected at pre-flight: 'teams' when CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 and team tooling is present, else 'subagent'. Optional for back-compat with pre-1.0.0 manifests."},
+    "docs_base": {"type": "string", "description": "The resolved output base directory (e.g. 'docs', 'documentation') under which cycle_root ('<docs_base>/plan-runner/$DATE/') was written, resolved at pre-flight from an explicit CLAUDE.md/AGENTS.md statement, a top-level docs-name scan, or the 'docs' default. Absent on manifests written before 1.15.0, which always used 'docs'."},
+    "verification": {
+      "type": "object",
+      "description": "Verification coverage config + per-cycle coverage counters. 'mode' is the resolved verify_mode; 'waves_verified'/'waves_skipped' tally how many waves got a semantic verifier versus an honest SKIPPED (e.g. earlier waves under last-wave-only). Optional for back-compat with manifests written before 1.9.0 (absent => the pre-1.9.0 default of one verifier per wave, full coverage).",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["per-agent", "per-wave", "last-wave-only"]},
+        "waves_total": {"type": ["integer", "null"]},
+        "waves_verified": {"type": "integer"},
+        "waves_skipped": {"type": "integer"}
+      }
+    },
+    "dag": {
+      "type": "object",
+      "description": "Additive task-DAG delivery evidence. It is present only for DAG runs; legacy wave/phase manifests omit it and remain valid.",
+      "required": ["mode", "base_ref", "integration_branch", "branch_owned", "events_path", "final_verification", "tasks"],
+      "properties": {
+        "mode": {"type": "string", "const": "dag"},
+        "base_ref": {"type": "string", "minLength": 1, "description": "Clean base commit captured before the run-owned integration branch was created."},
+        "integration_branch": {"type": "string", "minLength": 1, "description": "Run-owned branch that is the only valid DAG PR source; never infer it from the operator's active branch."},
+        "branch_owned": {"type": "boolean", "const": true, "description": "Proves that integration_branch belongs to this run rather than to the operator."},
+        "events_path": {"type": "string", "minLength": 1, "description": "Path to the append-only task lifecycle event stream."},
+        "stop_reason": {"type": ["string", "null"], "description": "Durable reason for the most recent DAG checkpoint or stop, when any."},
+        "final_verification": {
+          "type": "object",
+          "description": "Final dependency-frontier/PR-boundary verification evidence. A DAG PR is eligible only when this status is passed.",
+          "required": ["status", "artifacts"],
+          "properties": {
+            "status": {"type": "string", "enum": ["pending", "passed", "failed", "unverifiable"]},
+            "artifacts": {"type": "array", "items": {"type": "string"}},
+            "completed_at": {"type": ["string", "null"], "format": "date-time"}
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Task-oriented completion outcomes. Entries preserve retry, integration, block, lifecycle, verification, and best-effort token evidence without replacing legacy waves.",
+          "items": {
+            "type": "object",
+            "required": ["task_id", "required", "depends_on", "status", "attempts", "base_commit", "verification_artifacts", "retry_evidence", "lifecycle_event_ids", "tokens"],
+            "properties": {
+              "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+              "required": {"type": "boolean", "description": "Whether this graph task must integrate before PR delivery is eligible."},
+              "depends_on": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+              "status": {"type": "string", "enum": ["pending", "ready", "dispatched", "verifying", "retrying", "integrated", "blocked"]},
+              "attempts": {"type": "integer", "minimum": 0, "maximum": 2},
+              "base_commit": {"type": "string", "minLength": 1},
+              "produced_commit": {"type": ["string", "null"]},
+              "integrated_commit": {"type": ["string", "null"]},
+              "verification_artifacts": {"type": "array", "items": {"type": "string"}},
+              "retry_evidence": {"type": "array", "items": {"type": "string"}, "description": "Evidence paths or event ids for the bounded retry, empty when no retry occurred."},
+              "block_reason": {"type": ["string", "null"]},
+              "lifecycle_event_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "References into the append-only lifecycle event stream."},
+              "tokens": {"$ref": "#/$defs/tokenCount", "description": "Best-effort task-worker token evidence. null is retained when no usage was surfaced; never fabricate a value."}
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"status": {"const": "integrated"}}, "required": ["status"]},
+                "then": {
+                  "required": ["integrated_commit"],
+                  "properties": {
+                    "integrated_commit": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "blocked"}}, "required": ["status"]},
+                "then": {
+                  "required": ["block_reason"],
+                  "properties": {
+                    "block_reason": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "waves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["wave_id", "agents"],
+        "properties": {
+          "wave_id": {"type": "integer"},
+          "duration_seconds": {"type": ["integer", "null"]},
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["agent_id", "dev_status", "verifier_status", "bug_count"],
+              "properties": {
+                "agent_id": {"type": "string"},
+                "dev_status": {"type": "string"},
+                "verifier_status": {"type": "string"},
+                "bug_count": {"type": "integer"},
+                "tokens": {"$ref": "#/$defs/tokenCount"},
+                "agent_source": {"type": "string", "pattern": "^(bundled|project:.+)$", "description": "Provenance of the dev agent dispatched for this task: 'bundled' for the built-in plan-dev role, or 'project:<name>' for a project-defined agent selected by the dispatch overlay. Optional for back-compat with manifests written before 1.19.0 (pre-1.19.0), which carry no agent_source (dispatch was always bundled)."},
+                "resolved_model": {"type": "string", "minLength": 1, "description": "Concrete model identifier resolved for this agent's dispatch (Step 1d-septies), alongside agent_source. Optional for back-compat with manifests written before 2.1.0 (pre-2.1.0), which carry no resolved_model."},
+                "dispatch_mechanism": {"type": "string", "enum": ["endpoint", "host_subagent"], "description": "Dispatch mechanism that served this agent's task: 'endpoint' for an HTTP endpoint dispatch (models.endpoint.roles) or 'host_subagent' for the existing host-dispatched subagent facility. Optional for back-compat with manifests written before 2.2.0 (pre-2.2.0), which carry no dispatch_mechanism (dispatch was always host_subagent)."},
+                "model_substituted": {
+                  "type": ["object", "null"],
+                  "description": "Substitution applied to this agent's dispatch when its configured model could not be served, or null when none occurred. Optional for back-compat with manifests written before 2.1.0 (pre-2.1.0), which carry no model_substituted.",
+                  "required": ["configured", "dispatched"],
+                  "properties": {
+                    "configured": {"type": "string", "minLength": 1, "description": "The model or tier that was configured but could not be served."},
+                    "dispatched": {"type": "string", "minLength": 1, "description": "The model actually dispatched instead."},
+                    "reason": {"type": "string", "description": "Why the configured value could not be served."}
+                  }
+                }
+              }
+            }
+          },
+          "verifier_tokens": {"$ref": "#/$defs/tokenCount"},
+          "wave_token_total": {"type": ["integer", "null"], "description": "Sum of every non-null per-agent and verifier total in this wave; null when nothing was reported."},
+          "commit_sha": {"type": ["string", "null"]},
+          "skipped_reason": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "total_bugs": {"type": "integer"},
+    "token_usage": {
+      "type": ["object", "null"],
+      "description": "Best-effort tally of tokens consumed by every dispatched subagent (analyzer, dev agents, wave verifiers, aggregator). Captured from the usage figure the harness surfaces when each subagent completes, falling back to the agent's own token_usage self-report (the last figure the harness surfaced to it in-band) when the completion result carries none; entries are null where neither source yielded a figure. null until the run finalizes the tally. Optional for back-compat with manifests written before 1.5.0.",
+      "properties": {
+        "by_agent": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["agent", "phase"],
+            "properties": {
+              "agent": {"type": "string", "description": "Subagent label, e.g. 'analyzer', 'wave-2-agent-3', 'wave-2-verifier', 'aggregator'."},
+              "phase": {"type": "string", "enum": ["analyze", "wave", "verify", "aggregate"]},
+              "input": {"type": ["integer", "null"]},
+              "output": {"type": ["integer", "null"]},
+              "total": {"type": ["integer", "null"]},
+              "source": {"type": "string", "enum": ["harness", "self_report"], "description": "Where the figure came from: 'harness' = the completion result's usage summary (authoritative); 'self_report' = the agent's own token_usage return field (a lower bound). Absent when tokens are null, and on manifests written before 1.11.0 (absent = harness)."}
+            }
+          }
+        },
+        "total_tokens": {"type": "integer", "description": "Sum of every non-null per-agent total."},
+        "agents_reported": {"type": "integer", "description": "Count of dispatched subagents that surfaced a usage figure."},
+        "agents_total": {"type": "integer", "description": "Count of dispatched subagents in the run."},
+        "complete": {"type": "boolean", "description": "true only when agents_reported == agents_total (every subagent's usage was captured)."}
+      },
+      "required": ["total_tokens", "agents_reported", "agents_total", "complete"]
+    },
+    "next_cycle_plan": {"type": ["string", "null"]},
+    "code_atlas_sync": {
+      "type": ["object", "null"],
+      "description": "Outcome of the pre-PR code-atlas index sync (Step 7-bis). null until the step runs. ran=true when /code-atlas:update was invoked; ran=false with a reason when skipped (git not available, or code-atlas not detected). Optional for back-compat with manifests written before 1.4.0.",
+      "properties": {
+        "ran": {"type": "boolean"},
+        "reason": {"type": "string"}
+      },
+      "required": ["ran", "reason"]
+    },
+    "tdd": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "test_command": {
+          "type": "object",
+          "properties": {
+            "full": {"type": "string"},
+            "single_file": {"type": "string", "description": "Single-file invocation with a {file} placeholder, e.g. 'pytest {file}'."}
+          }
+        },
+        "baseline_failing": {"type": "array", "items": {"type": "string"}, "description": "Pre-existing failing tests at pre-flight; subtracted when attributing new failures."},
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["task", "test_files"],
+            "properties": {
+              "task": {"type": "string"},
+              "test_files": {"type": "array", "items": {"type": "string"}},
+              "red_run": {
+                "type": "object",
+                "properties": {
+                  "cmd": {"type": "string"},
+                  "exit": {"type": "integer"},
+                  "result": {"type": "string"},
+                  "valid_red": {"type": "boolean"}
+                }
+              },
+              "green_run": {
+                "type": "object",
+                "properties": {
+                  "cmd": {"type": "string"},
+                  "exit": {"type": "integer"},
+                  "result": {"type": "string", "description": "PASSED | FAILED | INVALID. INVALID (since the invalid-green rule) means the run executed zero tests -- an exit-0 pass that ran nothing is never recorded PASSED."},
+                  "valid_green": {"type": ["boolean", "null"], "description": "False when the green gate ran zero tests (result INVALID); null when the runner's test count could not be parsed and the verifier judges the raw output instead. Optional -- manifests written before the invalid-green rule (pre-1.18.0) omit it."}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tokenCount": {
+      "type": ["object", "null"],
+      "description": "Best-effort token usage for one subagent: the harness completion summary when surfaced, else the agent's own token_usage self-report. null when neither source yielded a figure; individual fields may be null when only a single total is reported.",
+      "properties": {
+        "input": {"type": ["integer", "null"]},
+        "output": {"type": ["integer", "null"]},
+        "total": {"type": ["integer", "null"]},
+        "source": {"type": "string", "enum": ["harness", "self_report", "http_usage"], "description": "Where the figure came from. 'self_report' figures are lower bounds; 'http_usage' is the authoritative usage object returned by an HTTP endpoint dispatch, added in 2.2.0. Absent on manifests written before 1.11.0 (absent = harness)."}
+      }
+    }
+  }
+}

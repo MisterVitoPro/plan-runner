@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-29-dag-execution.plan.md",
+  "nodes": [
+    {
+      "id": "task:dag-execution-t01",
+      "type": "task",
+      "label": "Define task graph, scheduler, and state",
+      "taskId": "dag-execution-t01"
+    },
+    {
+      "id": "task:dag-execution-t02",
+      "type": "task",
+      "label": "Define task workers and verifier handoffs",
+      "taskId": "dag-execution-t02"
+    },
+    {
+      "id": "task:dag-execution-t03",
+      "type": "task",
+      "label": "Make reports and PR handoff task-oriented",
+      "taskId": "dag-execution-t03"
+    },
+    {
+      "id": "task:dag-execution-t04",
+      "type": "task",
+      "label": "Add DAG contract and schema coverage",
+      "taskId": "dag-execution-t04"
+    },
+    {
+      "id": "task:dag-execution-t05",
+      "type": "task",
+      "label": "Document and release DAG executor",
+      "taskId": "dag-execution-t05"
+    },
+    {
+      "id": "contract:task-graph",
+      "type": "public-contract",
+      "contract": "validated task graph"
+    },
+    {
+      "id": "contract:task-state",
+      "type": "public-contract",
+      "contract": "durable task state and events"
+    },
+    {
+      "id": "contract:task-worktree",
+      "type": "public-contract",
+      "contract": "isolated task worktree result"
+    },
+    {
+      "id": "contract:ownership-conformance",
+      "type": "public-contract",
+      "contract": "validated owned-path diff"
+    },
+    {
+      "id": "contract:verification-result",
+      "type": "public-contract",
+      "contract": "scoped and independent verification result"
+    },
+    {
+      "id": "contract:task-report",
+      "type": "public-contract",
+      "contract": "task-oriented run evidence"
+    },
+    {
+      "id": "contract:pr-eligibility",
+      "type": "public-contract",
+      "contract": "human-review PR eligibility"
+    },
+    {
+      "id": "contract:dag-test-evidence",
+      "type": "public-contract",
+      "contract": "DAG contract and schema evidence"
+    },
+    {
+      "id": "contract:release-ready",
+      "type": "public-contract",
+      "contract": "documented synchronized release"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01",
+      "type": "depends-on",
+      "source": "task:dag-execution-t02",
+      "target": "task:dag-execution-t01"
+    },
+    {
+      "id": "e02",
+      "type": "depends-on",
+      "source": "task:dag-execution-t03",
+      "target": "task:dag-execution-t01"
+    },
+    {
+      "id": "e03",
+      "type": "depends-on",
+      "source": "task:dag-execution-t04",
+      "target": "task:dag-execution-t01"
+    },
+    {
+      "id": "e04",
+      "type": "depends-on",
+      "source": "task:dag-execution-t04",
+      "target": "task:dag-execution-t02"
+    },
+    {
+      "id": "e05",
+      "type": "depends-on",
+      "source": "task:dag-execution-t04",
+      "target": "task:dag-execution-t03"
+    },
+    {
+      "id": "e06",
+      "type": "depends-on",
+      "source": "task:dag-execution-t05",
+      "target": "task:dag-execution-t01"
+    },
+    {
+      "id": "e07",
+      "type": "depends-on",
+      "source": "task:dag-execution-t05",
+      "target": "task:dag-execution-t02"
+    },
+    {
+      "id": "e08",
+      "type": "depends-on",
+      "source": "task:dag-execution-t05",
+      "target": "task:dag-execution-t03"
+    },
+    {
+      "id": "e09",
+      "type": "depends-on",
+      "source": "task:dag-execution-t05",
+      "target": "task:dag-execution-t04"
+    },
+    {
+      "id": "e10",
+      "type": "produces",
+      "source": "task:dag-execution-t01",
+      "target": "contract:task-graph",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e11",
+      "type": "produces",
+      "source": "task:dag-execution-t01",
+      "target": "contract:task-state",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e12",
+      "type": "produces",
+      "source": "task:dag-execution-t02",
+      "target": "contract:task-worktree",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e13",
+      "type": "produces",
+      "source": "task:dag-execution-t02",
+      "target": "contract:ownership-conformance",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e14",
+      "type": "produces",
+      "source": "task:dag-execution-t02",
+      "target": "contract:verification-result",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e15",
+      "type": "produces",
+      "source": "task:dag-execution-t03",
+      "target": "contract:task-report",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e16",
+      "type": "produces",
+      "source": "task:dag-execution-t03",
+      "target": "contract:pr-eligibility",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e17",
+      "type": "produces",
+      "source": "task:dag-execution-t04",
+      "target": "contract:dag-test-evidence",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "id": "e18",
+      "type": "produces",
+      "source": "task:dag-execution-t05",
+      "target": "contract:release-ready",
+      "assurance": "declarative-unverified"
+    }
+  ]
+}

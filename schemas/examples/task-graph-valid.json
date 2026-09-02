@@ -1,0 +1,112 @@
+{
+  "source_plan": "test-fixtures/medium.md",
+  "context7_available": false,
+  "tasks": [
+    {
+      "task_id": "slow-audit",
+      "task_title": "Independent slow audit",
+      "task_excerpt_lines": "7-9",
+      "depends_on": [],
+      "owned_files": ["src/audit/slow.ts"],
+      "acceptance_criteria": ["Create `src/audit/slow.ts` with a deliberately slow isolated audit helper. It has no dependencies and must not own files used by the fast path."],
+      "recommended_model": "sonnet",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/audit/slow.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "fast-parent",
+      "task_title": "Fast parent",
+      "task_excerpt_lines": "11-12",
+      "depends_on": [],
+      "owned_files": ["src/fast/parent.ts"],
+      "acceptance_criteria": ["Create the dependency result consumed by Fast dependent."],
+      "recommended_model": "haiku",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/fast/parent.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "fast-dependent",
+      "task_title": "Fast dependent",
+      "task_excerpt_lines": "14-17",
+      "depends_on": ["fast-parent"],
+      "owned_files": ["src/fast/dependent.ts"],
+      "acceptance_criteria": ["Use the integrated result from src/fast/parent.ts without waiting for the unrelated slow audit."],
+      "recommended_model": "haiku",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/fast/dependent.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "user-model",
+      "task_title": "User model",
+      "task_excerpt_lines": "19-20",
+      "depends_on": [],
+      "owned_files": ["src/models/user.ts"],
+      "acceptance_criteria": ["Create a User interface with id, email, and createdAt fields."],
+      "recommended_model": "haiku",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/models/user.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "session-model",
+      "task_title": "Session model",
+      "task_excerpt_lines": "22-23",
+      "depends_on": ["user-model"],
+      "owned_files": ["src/models/session.ts"],
+      "acceptance_criteria": ["Create a Session interface with id, userId, and expiresAt fields after the User model exists."],
+      "recommended_model": "haiku",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/models/session.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "auth-types",
+      "task_title": "Auth types",
+      "task_excerpt_lines": "25-26",
+      "depends_on": [],
+      "owned_files": ["src/types/auth.ts"],
+      "acceptance_criteria": ["Create independent LoginRequest and LoginResponse types."],
+      "recommended_model": "haiku",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/types/auth.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "login-handler",
+      "task_title": "Login handler",
+      "task_excerpt_lines": "28-29",
+      "depends_on": ["user-model", "session-model", "auth-types"],
+      "owned_files": ["src/handlers/login.ts"],
+      "acceptance_criteria": ["Export handleLogin(req: LoginRequest): Promise<LoginResponse> using the User and Session models."],
+      "recommended_model": "sonnet",
+      "role": "standalone",
+      "testable": false,
+      "verification_scope": ["src/handlers/login.ts"],
+      "risk": "low"
+    },
+    {
+      "task_id": "login-handler-tests",
+      "task_title": "Login handler tests",
+      "task_excerpt_lines": "31-32",
+      "depends_on": ["login-handler"],
+      "owned_files": ["tests/handlers/login.test.ts"],
+      "acceptance_criteria": ["Create at least one test for handleLogin after the login handler is integrated."],
+      "recommended_model": "haiku",
+      "role": "test-author",
+      "testable": true,
+      "verification_scope": ["tests/handlers/login.test.ts"],
+      "risk": "low"
+    }
+  ],
+  "uncovered_plan_sections": [],
+  "token_usage": null
+}

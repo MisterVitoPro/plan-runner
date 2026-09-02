@@ -1,0 +1,56 @@
+# plan-runner — rules for working on this repo
+
+This is a dual-client Claude Code and Codex plugin. The Markdown prose in `skills/*/SKILL.md` and `agents/*.md` IS the product — edits to wording are behavior changes, not doc changes.
+
+## Verification
+
+```
+node --test tests/contract.test.js
+python tests/validate_schemas.py        # needs: pip install jsonschema
+claude plugin validate .
+# Also run the Codex plugin and skill validators used by CI.
+```
+
+`tests/contract.test.js` pins exact phrases and regexes in the skill/agent prose. When you edit prose, update the matching contract test in the same change — and when you add a feature, add a contract test that pins it.
+
+## Version bump protocol
+
+A release touches six places, in one commit:
+1. `.claude-plugin/plugin.json` `version`
+2. `.codex-plugin/plugin.json` `version`
+3. The pinned version assertion in `tests/contract.test.js` ("docs + version reflect the ... feature")
+4. `package.json` `version`
+5. A new `CHANGELOG.md` entry (SemVer: new pipeline behavior = minor, prose/doc fix = patch)
+6. `.claude-plugin/plugin.json` `description` — a deliberately short marketplace blurb (~250 chars; the plugin-ecosystem median is ~150 and every browsing surface truncates past a few lines). Update it only when the core pitch changes; per-release feature detail goes in the CHANGELOG and README, never appended here. A contract test caps it at 300 chars. (Pre-1.18.0 it accumulated a clause per release and reached 4,200+ chars.)
+
+Tagging and the marketplace pin are **automated** by `.github/workflows/marketplace-pin.yml`: when a merge to `main` bumps the synchronized manifest version, it tags the merge commit `vX.Y.Z` and updates the plugin's `ref` + `sha` in both `MisterVitoPro/esper` catalogs, plus the Claude catalog description, the plan-runner version badge in Esper's `README.md`, and the plan-runner row of Esper's `CLAUDE.md` plugin table (Esper's lint requires the badge to match the pinned ref). So a normal release is just: land the six-place version-bump commit on `main` via PR — the tag and both marketplace pins follow automatically. Don't hand-tag or hand-edit the marketplace for a routine release; doing both by hand races the workflow.
+
+Esper's per-plugin README section and CLAUDE.md description cell are prose the workflow does not write; when the core pitch changes (as in 2.0.0), update them by hand in a PR against `MisterVitoPro/esper`.
+
+Caveats: the `.claude-plugin/plugin.json` `description` field is especially important — the workflow copies it verbatim into the plan-runner entry of the Claude marketplace catalog, which is the only plugin copy users see when browsing the marketplace. No automated check catches drift (`node --test`, `tests/validate_schemas.py` and `claude plugin validate` all pass with a stale description), so it must be checked by hand at release time. The workflow only syncs when `.claude-plugin/plugin.json`'s version differs from the previous commit, so a description-only merge to `main` is a no-op; correcting the blurb requires a version bump (and under SemVer, a prose fix counts as a patch release).
+
+The workflow authenticates to `esper` with the `MARKETPLACE_DEPLOY_KEY` repo secret — the private half of an SSH deploy key registered with write access on that repo (scoped to it alone, not a personal PAT). Without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
+
+## Honesty invariants (never weaken these)
+
+- **Token accounting is best-effort.** Never fabricate a token count. Unreported agents get `null` plus coverage counters (`agents_reported`/`agents_total`/`complete`). Any new stat surfaced anywhere (dashboards, Token Report, PR body) sums non-null values only and labels partial coverage as a lower bound.
+- **No self-verify.** The orchestrator never substitutes its own judgment for a verifier's verdict. A missing verdict becomes `UNVERIFIABLE` and flows through the fix-plan loop — never a silently-closed wave.
+- **Verifier-coverage gate stays upstream of the PR step** on every path. It must remain structurally impossible to open a PR while a wave's verdict is outstanding.
+
+## Pipeline invariants
+
+- Max 6 agents per wave; waves are file-disjoint; the per-wave dev barrier (dispatch -> gates -> commit) holds on both backends.
+- Verification is pipelined off the critical path (since 1.14): dispatched right after the wave commit against a snapshot worktree of that commit, at most one wave's verification in flight, every verdict drained before aggregation. `--sync-verify` / `verification.pipelined: false` restores synchronous per-wave verification; no-git and no-commit waves are always synchronous.
+- Resolve pipeline role files relative to the active `SKILL.md` and include their instructions in native subagent prompts. Never depend on Codex automatically registering `agents/` files.
+- git is optional: every git operation must be gated on `git_available`.
+- Agents keep least-privilege `tools:` frontmatter — the analyzer is read-only (`Read, Grep, Glob`); the verifier adds `Write` solely for its file-backed `return_file` (reason recorded in its rules); aggregator adds only `Write`. Don't broaden these without a reason recorded in the agent's rules.
+
+## Schemas
+
+Any change to `schemas/*.schema.json` needs: matching valid AND invalid fixtures in `schemas/examples/`, and back-compat (new manifest fields are optional, with a "pre-X.Y.Z" note in the description — old manifests must still validate).
+
+## Paths and artifacts
+
+- Reference plugin files relative to the active skill or plugin root. Never use the old monorepo prefix `plugins/plan-runner/...`.
+- Run output lives under `docs/plan-runner/` in the target repo and is gitignored by the SessionStart hook — never commit generated cycle artifacts.
+- The SessionStart hook logic is inlined in `hooks/hooks.json` via `node -e`, deliberately avoiding `${CLAUDE_PLUGIN_ROOT}` (unreliable for SessionStart hooks on some builds) and any script file path. Keep it self-contained and silent-on-failure; if it grows beyond a one-liner, reconsider the design rather than reintroducing a path dependency.

@@ -1,0 +1,7 @@
+docs/specs/*.ledger.md
+docs/plan-runner/
+**/plan-runner/
+
+# Local plan-runner configuration. May name a private endpoint host, so it
+# stays out of the repository; copy the README example to create your own.
+.plan-runner.yml

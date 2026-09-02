@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-state.schema.json",
+  "title": "Run State Checkpoint",
+  "description": "Durable checkpoint for phased plan-runner executions. Records plan metadata, invocation context, phase list with per-phase status and directory, and overall run status for resumability and crash recovery.",
+  "type": "object",
+  "required": ["plan_path", "plan_content_hash", "invocation_flags", "backend", "verify_mode", "tdd_enabled", "phases", "overall_status", "updated_at"],
+  "properties": {
+    "plan_path": {
+      "type": "string",
+      "description": "Absolute or relative path to the source Markdown plan file."
+    },
+    "plan_content_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA256 hash of the plan file at run start, used to guard resume against plan drift."
+    },
+    "invocation_flags": {
+      "type": "object",
+      "description": "Verbatim CLI flags and config passed to the run skill.",
+      "required": ["phase_mode", "phasing_enabled"],
+      "properties": {
+        "phase_size": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Value of --phase-size flag if passed, otherwise null."
+        },
+        "phase_mode": {
+          "type": "string",
+          "enum": ["relay", "stop", "auto"],
+          "description": "Phase execution mode: relay (fresh-context driver), stop (session boundaries), or auto (adaptive)."
+        },
+        "phasing_enabled": {
+          "type": "boolean",
+          "description": "False if --no-phasing was passed, otherwise true if phasing config enabled it."
+        },
+        "no_phasing": {
+          "type": "boolean",
+          "description": "True if --no-phasing flag was explicitly passed."
+        }
+      }
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["subagent", "teams"],
+      "description": "The orchestrator backend: subagent (Claude Code native subagent / Codex) or teams (Agent Teams)."
+    },
+    "verify_mode": {
+      "type": "string",
+      "enum": ["per-agent", "per-wave", "last-wave-only"],
+      "description": "Verification coverage mode: per-agent (one verifier per dev agent), per-wave (one verifier per wave), or last-wave-only (verifier only on the final wave)."
+    },
+    "tdd_enabled": {
+      "type": "boolean",
+      "description": "True if test-driven-development mode is active."
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "description": "List of phases in execution order. Unphased runs contain a single phase covering all waves.",
+      "items": {
+        "type": "object",
+        "required": ["phase_id", "wave_range", "status", "directory"],
+        "properties": {
+          "phase_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-indexed phase number."
+          },
+          "wave_range": {
+            "type": "string",
+            "pattern": "^[0-9]+-[0-9]+$",
+            "description": "Inclusive wave range for this phase, e.g. '1-4' or '5-9'."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "complete"],
+            "description": "Phase status: pending (not started), in_progress (executing or interrupted), or complete (all waves done)."
+          },
+          "directory": {
+            "type": "string",
+            "description": "Absolute path to the phase directory (e.g. cycle-1/phase-1). Empty string for unphased runs."
+          },
+          "last_completed_wave": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "The highest wave number (global numbering) completed in this phase, or null if none."
+          }
+        }
+      }
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": ["active", "abandoned", "complete"],
+      "description": "Run-level status: active (in progress or resumable), abandoned (user declined auto-detect resume), or complete (all phases done)."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last state update (wave completion, phase boundary, or initial write)."
+    },
+    "dag": {
+      "type": "object",
+      "description": "Additive authoritative DAG checkpoint. Required by DAG mode; omitted by legacy wave checkpoints for backwards compatibility.",
+      "required": ["mode", "base_ref", "integration_branch", "branch_owned", "events_path", "max_integrations_per_phase", "integrations_completed", "tasks"],
+      "properties": {
+        "mode": {"type": "string", "const": "dag"},
+        "base_ref": {"type": "string", "minLength": 1},
+        "integration_branch": {"type": "string", "minLength": 1},
+        "branch_owned": {"type": "boolean", "const": true},
+        "events_path": {"type": "string", "minLength": 1},
+        "max_integrations_per_phase": {"type": "integer", "minimum": 1},
+        "integrations_completed": {"type": "integer", "minimum": 0},
+        "resume_task_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+        "stop_reason": {"type": ["string", "null"]},
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "description": "Authoritative durable record for one DAG task. Every outcome-bearing field is present so recovery never has to infer omitted state.",
+            "required": ["task_id", "depends_on", "status", "attempts", "base_commit", "produced_commit", "integrated_commit", "worktree_path", "verification_artifacts", "block_reason"],
+            "properties": {
+              "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+              "depends_on": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+              "status": {"type": "string", "enum": ["pending", "ready", "dispatched", "verifying", "retrying", "integrated", "blocked"]},
+              "attempts": {"type": "integer", "minimum": 0, "maximum": 2},
+              "base_commit": {"type": "string", "minLength": 1},
+              "produced_commit": {"type": ["string", "null"], "minLength": 1},
+              "integrated_commit": {"type": ["string", "null"], "minLength": 1},
+              "worktree_path": {"type": ["string", "null"], "minLength": 1},
+              "verification_artifacts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+              "block_reason": {"type": ["string", "null"], "minLength": 1}
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"status": {"enum": ["pending", "ready"]}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "produced_commit": {"type": "null"},
+                    "integrated_commit": {"type": "null"},
+                    "worktree_path": {"type": "null"},
+                    "verification_artifacts": {"maxItems": 0},
+                    "block_reason": {"type": "null"}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "dispatched"}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "produced_commit": {"type": "null"},
+                    "integrated_commit": {"type": "null"},
+                    "worktree_path": {"type": "string", "minLength": 1},
+                    "verification_artifacts": {"maxItems": 0},
+                    "block_reason": {"type": "null"}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "verifying"}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "produced_commit": {"type": "string", "minLength": 1},
+                    "integrated_commit": {"type": "null"},
+                    "worktree_path": {"type": "string", "minLength": 1},
+                    "block_reason": {"type": "null"}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "retrying"}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "integrated_commit": {"type": "null"},
+                    "worktree_path": {"type": "string", "minLength": 1},
+                    "verification_artifacts": {"minItems": 1},
+                    "block_reason": {"type": "null"}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "integrated"}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "produced_commit": {"type": "string", "minLength": 1},
+                    "integrated_commit": {"type": "string", "minLength": 1},
+                    "worktree_path": {"type": "null"},
+                    "verification_artifacts": {"minItems": 1},
+                    "block_reason": {"type": "null"}
+                  }
+                }
+              },
+              {
+                "if": {"properties": {"status": {"const": "blocked"}}, "required": ["status"]},
+                "then": {
+                  "properties": {
+                    "integrated_commit": {"type": "null"},
+                    "worktree_path": {"type": "null"},
+                    "block_reason": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "model_policy": {
+      "type": "object",
+      "description": "Resolved model configuration for this run (Step 1d-septies), persisted so a resume or phase relay rehydrates it instead of re-resolving .plan-runner.yml or re-asking the availability gate. Optional for back-compat with run-state documents written before 2.1.0 (pre-2.1.0), which carry no model_policy (also absent when model config is disabled for the run).",
+      "required": ["resolved", "substitutions"],
+      "properties": {
+        "resolved": {
+          "type": "object",
+          "description": "Resolved model map keyed by pipeline role or tier (e.g. 'analyzer', 'dev', 'haiku'). Each entry pins the concrete model identifier dispatched for that key and where it came from.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["model", "source"],
+            "properties": {
+              "model": {"type": "string", "minLength": 1, "description": "Concrete model identifier or tier word dispatched for this role or tier."},
+              "source": {"type": "string", "enum": ["flag", "yml", "default"], "description": "Where this entry's value came from: an invocation flag, .plan-runner.yml, or the built-in default."}
+            }
+          }
+        },
+        "endpoint": {
+          "type": ["object", "null"],
+          "description": "Custom endpoint preflight record, present only when models.endpoint.base_url was configured. Never carries a credential value -- only the api_key_env variable NAME.",
+          "properties": {
+            "base_url": {"type": "string", "minLength": 1},
+            "api_key_env": {"type": ["string", "null"], "description": "Name of the environment variable expected to hold the API key. Never the key value itself."},
+            "health": {"type": "string", "enum": ["reachable", "unreachable", "unchecked"], "description": "Most recently observed endpoint health. See health_by_phase for the per-phase history."},
+            "roles": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "uniqueItems": true,
+              "description": "Endpoint-bound role list resolved from models.endpoint.roles (eligible worker roles only; analyzer, aggregator, and verifier are ineligible by design and are never listed here). Optional for back-compat with run-state documents written before 2.2.0, which carry no roles list."
+            },
+            "health_by_phase": {
+              "type": "array",
+              "description": "Endpoint health captured at preflight and re-probed at each phase relay or resume boundary. Optional for back-compat with run-state documents written before 2.2.0, which carry only the flat health field above.",
+              "items": {
+                "type": "object",
+                "required": ["phase_id", "health"],
+                "properties": {
+                  "phase_id": {"type": "integer", "minimum": 1},
+                  "health": {"type": "string", "enum": ["reachable", "unreachable"]}
+                }
+              }
+            },
+            "dispatch_by_role": {
+              "type": "object",
+              "description": "Dispatch mechanism that served each pipeline role this run: 'endpoint' for an HTTP endpoint dispatch (models.endpoint.roles) or 'host_subagent' for the existing host-dispatched subagent facility. Keyed by role name from model_policy.resolved. Optional for back-compat with run-state documents written before 2.2.0, which carry no dispatch_by_role (dispatch was always host_subagent).",
+              "additionalProperties": {"type": "string", "enum": ["endpoint", "host_subagent"]}
+            }
+          }
+        },
+        "consent": {
+          "type": "string",
+          "enum": ["granted", "declined", "auto"],
+          "description": "Operator's answer to the availability gate, cached for the remainder of the run: 'granted' (substitute by task complexity), 'declined' (keep pre-feature defaults), or 'auto' (no structured-input facility available, or the gate went unanswered, so the closest available model was dispatched without asking). Absent when the availability gate was never opened (e.g. an ordinary run where nothing was ever unavailable), since there is then no operator answer to record."
+        },
+        "substitutions": {
+          "type": "array",
+          "description": "Every model substitution recorded this run, preflight or mid-run.",
+          "items": {
+            "type": "object",
+            "required": ["configured", "dispatched"],
+            "properties": {
+              "role": {"type": "string", "description": "Pipeline role or tier this substitution applied to."},
+              "configured": {"type": "string", "minLength": 1, "description": "The model or tier that was configured but could not be served."},
+              "dispatched": {"type": "string", "minLength": 1, "description": "The model actually dispatched instead."},
+              "reason": {"type": "string", "description": "Why the configured value could not be served."}
+            }
+          }
+        }
+      }
+    }
+  }
+}

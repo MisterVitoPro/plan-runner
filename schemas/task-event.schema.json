@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-event.schema.json",
+  "title": "Plan Runner Task Lifecycle Event",
+  "description": "One append-only JSONL record written by the DAG scheduler. Events are evidence, never a source for inferred completion; run-state remains authoritative.",
+  "type": "object",
+  "required": ["event_id", "timestamp", "event_type", "run_id"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "event_type": {"type": "string", "enum": ["dag_selected", "wave_fallback", "base_captured", "integration_branch_created", "paths_reserved", "task_dispatched", "task_retry_requested", "task_verified", "task_integrated", "task_blocked", "paths_released", "checkpoint", "resume", "final_verification"]},
+    "run_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+    "attempt": {"type": "integer", "minimum": 0},
+    "base_ref": {"type": "string"},
+    "integration_branch": {"type": "string"},
+    "integration_commit": {"type": ["string", "null"], "minLength": 1, "description": "Integration commit produced by a successful paths_released event, or null when the reservation was blocked or disposed before integration."},
+    "reason": {"type": "string"},
+    "artifacts": {"type": "array", "items": {"type": "string"}},
+    "reservation_id": {"type": "string", "minLength": 1, "description": "Stable identifier for a writer-path reservation. A paths_released event repeats the identifier of the paths_reserved event it releases."},
+    "paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}, "description": "Normalized owned and shared paths covered by a paths_reserved or paths_released lifecycle event."},
+    "terminal_status": {"type": "string", "enum": ["INTEGRATED", "BLOCKED", "DISPOSED"], "description": "Terminal or disposal outcome that caused a paths_released event."}
+  },
+  "allOf": [
+    {"if": {"properties": {"event_type": {"enum": ["paths_reserved", "task_dispatched", "task_retry_requested", "task_verified", "task_integrated", "task_blocked", "paths_released"]}}, "required": ["event_type"]}, "then": {"required": ["task_id"]}},
+    {"if": {"properties": {"event_type": {"const": "integration_branch_created"}}, "required": ["event_type"]}, "then": {"required": ["base_ref", "integration_branch"]}},
+    {"if": {"properties": {"event_type": {"const": "paths_reserved"}}, "required": ["event_type"]}, "then": {"required": ["reservation_id", "task_id", "attempt", "paths"]}},
+    {"if": {"properties": {"event_type": {"const": "paths_released"}}, "required": ["event_type"]}, "then": {"required": ["reservation_id", "task_id", "attempt", "paths", "terminal_status", "integration_commit"]}}
+  ]
+}

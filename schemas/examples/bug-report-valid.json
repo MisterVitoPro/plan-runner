@@ -1,0 +1,29 @@
+{
+  "agent_id": "wave-1-agent-1",
+  "task_title": "run-state.json schema and fixtures",
+  "verifier_status": "BUGS_FOUND",
+  "bugs": [
+    {
+      "bug_id": "wave-1-agent-1-bug-1",
+      "severity": "P1",
+      "category": "missing_requirement",
+      "title": "Missing 'updated_at' field in run-state schema",
+      "file": "schemas/run-state.schema.json",
+      "line": 15,
+      "evidence": "The schema properties object does not include an 'updated_at' field, but the spec at docs/specs/2026-07-16-large-plan-phasing.md line 42 explicitly requires recording when the state was last updated.",
+      "expected": "The run-state schema should have a required 'updated_at' property of type string (ISO 8601 timestamp) to track state mutations.",
+      "suggested_fix": "Add \"updated_at\": {\"type\": \"string\", \"format\": \"date-time\"} to the schema properties and add it to the required fields array."
+    },
+    {
+      "bug_id": "wave-1-agent-1-bug-2",
+      "severity": "P2",
+      "category": "incorrect_implementation",
+      "title": "Phase status enum incomplete",
+      "file": "schemas/run-state.schema.json",
+      "line": null,
+      "evidence": "The phase status enum only includes ['pending', 'in_progress'] but the spec mentions 'completed' as a valid terminal state.",
+      "expected": "The enum should include all three states: pending, in_progress, completed",
+      "suggested_fix": "Change the status enum to {\"enum\": [\"pending\", \"in_progress\", \"completed\"]}"
+    }
+  ]
+}

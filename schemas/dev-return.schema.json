@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dev-return.schema.json",
+  "title": "Dev Agent Return",
+  "type": "object",
+  "required": ["status", "files_written", "files_unexpectedly_modified", "context7_queries", "summary", "concerns"],
+  "properties": {
+    "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+    "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "description": "Stable DAG task identifier. Optional for backwards-compatible wave returns; required by the DAG scheduler before it accepts a task return."},
+    "task_worktree": {"type": "string", "minLength": 1, "description": "Absolute disposable DAG task-worktree path. Optional for legacy wave returns."},
+    "task_base_commit": {"type": "string", "minLength": 1, "description": "Integration commit used to create the DAG task worktree. The scheduler uses it for stale-base checks."},
+    "verification_scope": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "description": "DAG-only paths that must be included in scoped deterministic checks and stale-base review."},
+    "status": {"type": "string", "enum": ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"]},
+    "files_written": {"type": "array", "items": {"type": "string"}},
+    "files_unexpectedly_modified": {"type": "array", "items": {"type": "string"}},
+    "context7_queries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["library", "purpose"],
+        "properties": {"library": {"type": "string"}, "purpose": {"type": "string"}}
+      }
+    },
+    "summary": {"type": "string", "maxLength": 2000, "description": "Distilled summary of what the agent accomplished or attempted. Pre-1.13.0 artifacts uncapped."},
+    "concerns": {"type": "array", "items": {"type": "string", "maxLength": 1000}, "description": "Any reservations or open questions. Pre-1.13.0 artifacts uncapped."},
+    "test_files": {"type": "array", "items": {"type": "string"}, "description": "test-author role: test files written, for orchestrator-scoped gate runs."},
+    "test_ids": {"type": "array", "items": {"type": "string"}, "description": "test-author role: individual test names/IDs added."},
+    "token_usage": {
+      "type": ["object", "null"],
+      "description": "Token self-report: the most recent usage figure the harness surfaced to the agent in-band (e.g. a token-budget system warning), or null when none appeared. A lower bound (it predates the agent's final response), never an estimate. Used by the orchestrator as a fallback when the completion result carries no usage figure. Optional for back-compat with returns written before 1.11.0.",
+      "properties": {
+        "input": {"type": ["integer", "null"]},
+        "output": {"type": ["integer", "null"]},
+        "total": {"type": ["integer", "null"]}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "anyOf": [
+        {"required": ["agent_id"]},
+        {"required": ["task_id", "task_worktree", "task_base_commit", "verification_scope"]}
+      ]
+    }
+  ]
+}

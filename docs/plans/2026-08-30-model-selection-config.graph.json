@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-30-model-selection-config.plan.md",
+  "nodes": [
+    {
+      "id": "task:model-selection-config-t01",
+      "type": "task",
+      "label": "Model policy prose and contract pins",
+      "taskId": "model-selection-config-t01"
+    },
+    {
+      "id": "task:model-selection-config-t02",
+      "type": "task",
+      "label": "run-state and manifest schema extensions",
+      "taskId": "model-selection-config-t02"
+    },
+    {
+      "id": "task:model-selection-config-t03",
+      "type": "task",
+      "label": "Analyzer served-model self-report",
+      "taskId": "model-selection-config-t03"
+    },
+    {
+      "id": "task:model-selection-config-t04",
+      "type": "task",
+      "label": "User-facing documentation",
+      "taskId": "model-selection-config-t04"
+    },
+    {
+      "id": "task:model-selection-config-t05",
+      "type": "task",
+      "label": "Release -- version bump and changelog",
+      "taskId": "model-selection-config-t05"
+    },
+    {
+      "id": "contract:models-config-block",
+      "type": "public-contract",
+      "contract": "the .plan-runner.yml models: block (enabled, tiers, per-role keys, endpoint)"
+    },
+    {
+      "id": "contract:resolution-precedence-chain",
+      "type": "public-contract",
+      "contract": "frontmatter > per-role key > tier map > built-in default"
+    },
+    {
+      "id": "contract:model-policy-shape",
+      "type": "public-contract",
+      "contract": "run-state model_policy object and manifest resolved_model / model_substituted fields"
+    },
+    {
+      "id": "contract:analyzer-served-model",
+      "type": "public-contract",
+      "contract": "orchestrator-side comparison of the analyzer's served model against the configured one"
+    },
+    {
+      "id": "contract:cli-surface",
+      "type": "public-contract",
+      "contract": "--no-model-config flag and models.enabled key"
+    },
+    {
+      "id": "contract:release-pin-2.1.0",
+      "type": "public-contract",
+      "contract": "contract-test release pin asserted at 2.1.0"
+    },
+    {
+      "id": "contract:model-policy-schema",
+      "type": "public-contract",
+      "contract": "validated run-state and manifest shapes with back-compat fixtures"
+    },
+    {
+      "id": "contract:analyzer-return-model-field",
+      "type": "public-contract",
+      "contract": "analyzer return field carrying its served model, null when undeterminable"
+    },
+    {
+      "id": "contract:user-docs",
+      "type": "public-contract",
+      "contract": "README coverage of the models: block, the flag, local endpoints, and the gate"
+    },
+    {
+      "id": "contract:release-2.1.0",
+      "type": "public-contract",
+      "contract": "synchronized release metadata read by the marketplace-pin workflow"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t02",
+      "target": "task:model-selection-config-t01"
+    },
+    {
+      "id": "e02",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t03",
+      "target": "task:model-selection-config-t01"
+    },
+    {
+      "id": "e03",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t04",
+      "target": "task:model-selection-config-t01"
+    },
+    {
+      "id": "e04",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t05",
+      "target": "task:model-selection-config-t01"
+    },
+    {
+      "id": "e05",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t05",
+      "target": "task:model-selection-config-t02"
+    },
+    {
+      "id": "e06",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t05",
+      "target": "task:model-selection-config-t03"
+    },
+    {
+      "id": "e07",
+      "type": "depends-on",
+      "source": "task:model-selection-config-t05",
+      "target": "task:model-selection-config-t04"
+    },
+    {
+      "id": "e08",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:models-config-block"
+    },
+    {
+      "id": "e09",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:resolution-precedence-chain"
+    },
+    {
+      "id": "e10",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:model-policy-shape"
+    },
+    {
+      "id": "e11",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:analyzer-served-model"
+    },
+    {
+      "id": "e12",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:cli-surface"
+    },
+    {
+      "id": "e13",
+      "type": "produces",
+      "source": "task:model-selection-config-t01",
+      "target": "contract:release-pin-2.1.0"
+    },
+    {
+      "id": "e14",
+      "type": "produces",
+      "source": "task:model-selection-config-t02",
+      "target": "contract:model-policy-schema"
+    },
+    {
+      "id": "e15",
+      "type": "produces",
+      "source": "task:model-selection-config-t03",
+      "target": "contract:analyzer-return-model-field"
+    },
+    {
+      "id": "e16",
+      "type": "produces",
+      "source": "task:model-selection-config-t04",
+      "target": "contract:user-docs"
+    },
+    {
+      "id": "e17",
+      "type": "produces",
+      "source": "task:model-selection-config-t05",
+      "target": "contract:release-2.1.0"
+    }
+  ]
+}

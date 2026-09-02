@@ -1,0 +1,42 @@
+{
+  "plan_path": "docs/plans/2026-07-16-large-plan.md",
+  "plan_content_hash": "not-a-valid-sha256-hash",
+  "invocation_flags": {
+    "phase_size": -1,
+    "phase_mode": "unknown_mode",
+    "phasing_enabled": true,
+    "no_phasing": false
+  },
+  "backend": "invalid_backend",
+  "verify_mode": "permissive",
+  "tdd_enabled": false,
+  "phases": [
+    {
+      "phase_id": "one",
+      "wave_range": "1",
+      "status": "running",
+      "directory": "docs/plan-runner/2026-07-16/cycle-1/phase-1",
+      "last_completed_wave": "four"
+    }
+  ],
+  "overall_status": "uncertain",
+  "updated_at": "not-a-timestamp",
+  "dag": {
+    "mode": "dag",
+    "base_ref": "4a1b2c3d",
+    "integration_branch": "plan-runner/cycle-1",
+    "branch_owned": false,
+    "events_path": "events.jsonl",
+    "max_integrations_per_phase": 0,
+    "integrations_completed": -1,
+    "tasks": [
+      {
+        "task_id": "dag-execution-t01",
+        "depends_on": [],
+        "status": "integrated",
+        "attempts": 3,
+        "base_commit": "4a1b2c3d"
+      }
+    ]
+  }
+}

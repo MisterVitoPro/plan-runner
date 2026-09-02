@@ -1,0 +1,30 @@
+{
+  "plan_path": "docs/plans/2026-08-30-model-selection-config.plan.md",
+  "plan_content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "invocation_flags": {
+    "phase_mode": "stop",
+    "phasing_enabled": false
+  },
+  "backend": "subagent",
+  "verify_mode": "per-wave",
+  "tdd_enabled": false,
+  "phases": [
+    {
+      "phase_id": 1,
+      "wave_range": "1-3",
+      "status": "complete",
+      "directory": "docs/plan-runner/2026-08-30/cycle-1",
+      "last_completed_wave": 3
+    }
+  ],
+  "overall_status": "complete",
+  "updated_at": "2026-08-30T00:00:00Z",
+  "model_policy": {
+    "resolved": {
+      "dev": {"model": "claude-sonnet-5", "source": "yml"}
+    },
+    "substitutions": [
+      {"role": "dev", "configured": "gpt-5-custom", "dispatched": "claude-sonnet-5", "reason": "configured model unavailable at endpoint"}
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "plan-runner",
+  "version": "2.2.0",
+  "description": "Execute Markdown plans as safe task DAGs with isolated worktrees, independent verification, durable recovery evidence, and human-reviewed PR delivery; falls back to verified waves without Git.",
+  "author": {
+    "name": "MisterVitoPro",
+    "url": "https://github.com/MisterVitoPro"
+  },
+  "homepage": "https://github.com/MisterVitoPro/plan-runner",
+  "repository": "https://github.com/MisterVitoPro/plan-runner",
+  "license": "MIT",
+  "keywords": [
+    "agent-orchestration",
+    "implementation-plan",
+    "parallel-agents",
+    "verification",
+    "tdd",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plan Runner",
+    "shortDescription": "Execute plans as verified task DAGs",
+    "longDescription": "Analyze a Markdown plan into a dependency-ready task graph, run each ready task in its own disposable Git worktree with test-first and implementation agents, gate every task with deterministic checks and independent verification before a central integrator applies it to a run-owned branch, checkpoint durable task state for resume, aggregate bugs into a re-runnable fix plan, and open a human-reviewed pull request. Falls back to verified file-disjoint waves without Git.",
+    "developerName": "MisterVitoPro",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/MisterVitoPro/plan-runner",
+    "defaultPrompt": [
+      "Run this implementation plan with Plan Runner.",
+      "Execute this plan as a task DAG with per-task verification.",
+      "Open a pull request for this completed Plan Runner cycle."
+    ],
+    "brandColor": "#EA580C"
+  }
+}

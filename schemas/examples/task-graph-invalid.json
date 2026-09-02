@@ -1,0 +1,17 @@
+{
+  "source_plan": "test-fixtures/medium.md",
+  "context7_available": false,
+  "tasks": [
+    {
+      "task_id": "bad task id with spaces",
+      "task_title": "Malformed task",
+      "task_excerpt_lines": "9-1",
+      "depends_on": [],
+      "owned_files": [],
+      "acceptance_criteria": [],
+      "recommended_model": "unknown",
+      "verification_scope": []
+    }
+  ],
+  "uncovered_plan_sections": []
+}

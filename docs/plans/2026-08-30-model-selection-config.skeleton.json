@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-30-model-selection-config.plan.md",
+  "entries": [
+    {
+      "path": "skills/run/SKILL.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "skills/pr/SKILL.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "tests/contract.test.js",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/run-state.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/manifest.schema.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/run-state-model-policy-valid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/run-state-model-policy-invalid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/manifest-model-policy-valid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "schemas/examples/manifest-model-policy-invalid.json",
+      "classification": "created",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "tests/validate_schemas.py",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "agents/plan-analyzer.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "README.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "package.json",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "classification": "opaque-preserved",
+      "assurance": "declarative-unverified"
+    }
+  ]
+}

@@ -1,0 +1,428 @@
+{
+  "schemaVersion": 1,
+  "plan": "docs/plans/2026-08-30-local-endpoint-dispatch.plan.md",
+  "spec": "docs/specs/2026-08-30-local-endpoint-dispatch.md",
+  "nodes": [
+    {
+      "id": "task:local-endpoint-dispatch-t01",
+      "type": "task",
+      "label": "HTTP dispatch driver and fenced-block parser",
+      "taskId": "local-endpoint-dispatch-t01"
+    },
+    {
+      "id": "task:local-endpoint-dispatch-t02",
+      "type": "task",
+      "label": "Unit tests for the driver and parser",
+      "taskId": "local-endpoint-dispatch-t02"
+    },
+    {
+      "id": "task:local-endpoint-dispatch-t03",
+      "type": "task",
+      "label": "SKILL.md dispatch prose",
+      "taskId": "local-endpoint-dispatch-t03"
+    },
+    {
+      "id": "task:local-endpoint-dispatch-t04",
+      "type": "task",
+      "label": "Contract tests and release pin",
+      "taskId": "local-endpoint-dispatch-t04"
+    },
+    {
+      "id": "task:local-endpoint-dispatch-t05",
+      "type": "task",
+      "label": "Schema extensions and fixtures",
+      "taskId": "local-endpoint-dispatch-t05"
+    },
+    {
+      "id": "task:local-endpoint-dispatch-t06",
+      "type": "task",
+      "label": "Documentation and release",
+      "taskId": "local-endpoint-dispatch-t06"
+    },
+    {
+      "id": "path:scripts/http-dispatch.js",
+      "type": "path",
+      "label": "scripts/http-dispatch.js",
+      "disposition": "create"
+    },
+    {
+      "id": "path:scripts/fenced-blocks.js",
+      "type": "path",
+      "label": "scripts/fenced-blocks.js",
+      "disposition": "create"
+    },
+    {
+      "id": "path:tests/http-dispatch.test.js",
+      "type": "path",
+      "label": "tests/http-dispatch.test.js",
+      "disposition": "create"
+    },
+    {
+      "id": "path:tests/fenced-blocks.test.js",
+      "type": "path",
+      "label": "tests/fenced-blocks.test.js",
+      "disposition": "create"
+    },
+    {
+      "id": "path:skills/run/SKILL.md",
+      "type": "path",
+      "label": "skills/run/SKILL.md",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:tests/contract.test.js",
+      "type": "path",
+      "label": "tests/contract.test.js",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:schemas/run-state.schema.json",
+      "type": "path",
+      "label": "schemas/run-state.schema.json",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:schemas/manifest.schema.json",
+      "type": "path",
+      "label": "schemas/manifest.schema.json",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:schemas/examples/run-state-endpoint-dispatch-valid.json",
+      "type": "path",
+      "label": "schemas/examples/run-state-endpoint-dispatch-valid.json",
+      "disposition": "create"
+    },
+    {
+      "id": "path:schemas/examples/run-state-endpoint-dispatch-invalid.json",
+      "type": "path",
+      "label": "schemas/examples/run-state-endpoint-dispatch-invalid.json",
+      "disposition": "create"
+    },
+    {
+      "id": "path:schemas/examples/manifest-http-usage-valid.json",
+      "type": "path",
+      "label": "schemas/examples/manifest-http-usage-valid.json",
+      "disposition": "create"
+    },
+    {
+      "id": "path:schemas/examples/manifest-http-usage-invalid.json",
+      "type": "path",
+      "label": "schemas/examples/manifest-http-usage-invalid.json",
+      "disposition": "create"
+    },
+    {
+      "id": "path:tests/validate_schemas.py",
+      "type": "path",
+      "label": "tests/validate_schemas.py",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:README.md",
+      "type": "path",
+      "label": "README.md",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:CHANGELOG.md",
+      "type": "path",
+      "label": "CHANGELOG.md",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:.claude-plugin/plugin.json",
+      "type": "path",
+      "label": ".claude-plugin/plugin.json",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:.codex-plugin/plugin.json",
+      "type": "path",
+      "label": ".codex-plugin/plugin.json",
+      "disposition": "modify"
+    },
+    {
+      "id": "path:package.json",
+      "type": "path",
+      "label": "package.json",
+      "disposition": "modify"
+    },
+    {
+      "id": "contract:request-spec",
+      "type": "contract",
+      "label": "Request spec: role, endpoint, resolved model, messages, merged request params, output path"
+    },
+    {
+      "id": "contract:response-record",
+      "type": "contract",
+      "label": "Response record: assistant content, usage, served model, attempt count, error"
+    },
+    {
+      "id": "contract:parser-result",
+      "type": "contract",
+      "label": "Parser result: written paths and refused paths, given blocks plus an owned-file list"
+    },
+    {
+      "id": "contract:dispatch-map-line",
+      "type": "contract",
+      "label": "Preflight console line naming each endpoint-bound role and its dispatch mechanism"
+    },
+    {
+      "id": "contract:roles-config",
+      "type": "contract",
+      "label": "models.endpoint.roles list and the request passthrough block"
+    },
+    {
+      "id": "contract:conventions-sample-rule",
+      "type": "contract",
+      "label": "Nearest-first selection with a 3-file / 32 KB cap and an empty-sample report"
+    },
+    {
+      "id": "contract:release-pin",
+      "type": "contract",
+      "label": "Pinned synchronized release version asserted by the contract suite"
+    },
+    {
+      "id": "contract:model-policy-dispatch",
+      "type": "contract",
+      "label": "Persisted endpoint role list, per-phase health, and per-role dispatch mechanism"
+    },
+    {
+      "id": "dep:curl",
+      "type": "external",
+      "label": "curl executable (transport)"
+    },
+    {
+      "id": "dep:node-stdlib",
+      "type": "external",
+      "label": "Node standard library"
+    }
+  ],
+  "edges": [
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "path:scripts/http-dispatch.js",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "path:scripts/fenced-blocks.js",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "path:tests/http-dispatch.test.js",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "path:tests/fenced-blocks.test.js",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "task:local-endpoint-dispatch-t01",
+      "type": "blocked-by"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "path:skills/run/SKILL.md",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "task:local-endpoint-dispatch-t01",
+      "type": "blocked-by"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "path:tests/contract.test.js",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "task:local-endpoint-dispatch-t03",
+      "type": "blocked-by"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/run-state.schema.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/manifest.schema.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/examples/run-state-endpoint-dispatch-valid.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/examples/run-state-endpoint-dispatch-invalid.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/examples/manifest-http-usage-valid.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:schemas/examples/manifest-http-usage-invalid.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "path:tests/validate_schemas.py",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "task:local-endpoint-dispatch-t01",
+      "type": "blocked-by"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "path:README.md",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "path:CHANGELOG.md",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "path:.claude-plugin/plugin.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "path:.codex-plugin/plugin.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "path:package.json",
+      "type": "owns"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "task:local-endpoint-dispatch-t03",
+      "type": "blocked-by"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "contract:request-spec",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "contract:response-record",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "contract:parser-result",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "contract:dispatch-map-line",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "contract:roles-config",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "contract:conventions-sample-rule",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "contract:release-pin",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "contract:model-policy-dispatch",
+      "type": "produces"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "dep:curl",
+      "type": "requires"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t01",
+      "to": "dep:node-stdlib",
+      "type": "requires"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "contract:request-spec",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "contract:response-record",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t02",
+      "to": "contract:parser-result",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "contract:request-spec",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t03",
+      "to": "contract:response-record",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "contract:dispatch-map-line",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "contract:roles-config",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t04",
+      "to": "contract:conventions-sample-rule",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t05",
+      "to": "contract:response-record",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "contract:dispatch-map-line",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "contract:roles-config",
+      "type": "consumes"
+    },
+    {
+      "from": "task:local-endpoint-dispatch-t06",
+      "to": "contract:release-pin",
+      "type": "consumes"
+    }
+  ]
+}

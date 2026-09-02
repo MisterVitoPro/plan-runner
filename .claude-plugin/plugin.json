@@ -1,0 +1,21 @@
+{
+  "name": "plan-runner",
+  "displayName": "Plan Runner",
+  "homepage": "https://github.com/MisterVitoPro/plan-runner",
+  "description": "Execute Markdown plans as safe task DAGs with isolated Git worktrees, independent verification, durable recovery evidence, and human-reviewed PR delivery. Falls back to verified waves without Git. Works in Claude Code and Codex.",
+  "version": "2.2.0",
+  "license": "MIT",
+  "keywords": [
+    "agent-orchestration",
+    "implementation-plan",
+    "parallel-agents",
+    "verification",
+    "swarm",
+    "tdd",
+    "developer-tools"
+  ],
+  "repository": "https://github.com/MisterVitoPro/plan-runner",
+  "author": {
+    "name": "MisterVitoPro"
+  }
+}

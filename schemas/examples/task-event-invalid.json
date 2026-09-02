@@ -1,0 +1,10 @@
+{
+  "event_id": "event-002",
+  "timestamp": "2026-08-29T10:02:00Z",
+  "event_type": "paths_released",
+  "run_id": "cycle-1",
+  "reservation_id": "reservation-dag-execution-t01-attempt-1",
+  "task_id": "dag-execution-t01",
+  "attempt": 1,
+  "paths": ["agents/plan-integrator.md"]
+}

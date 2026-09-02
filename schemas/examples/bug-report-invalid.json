@@ -1,0 +1,18 @@
+{
+  "agent_id": "wave-1-agent-1",
+  "task_title": "run-state.json schema and fixtures",
+  "verifier_status": "BUGS_FOUND",
+  "bugs": [
+    {
+      "bug_id": "wave-1-agent-1-bug-1",
+      "severity": "P1",
+      "category": "missing_requirement",
+      "title": "This title field contains text that is intentionally longer than the 500-character maxLength cap to test the validation constraint. It includes a long explanation that goes on and on, providing excessive detail about the bug that really should have been kept brief. In a real scenario, this would be trimmed or rejected by the schema validation, ensuring that agent returns stay within the bounded return budget of 1-2k tokens per agent. This demonstration field shows how the schema protects against unbounded text fields that could consume excessive context and memory. The total length here significantly exceeds the generous 500 character limit.",
+      "file": "schemas/run-state.schema.json",
+      "line": 15,
+      "evidence": "The schema properties object does not include an 'updated_at' field, but the spec at docs/specs/2026-07-16-large-plan-phasing.md line 42 explicitly requires recording when the state was last updated.",
+      "expected": "The run-state schema should have a required 'updated_at' property of type string (ISO 8601 timestamp) to track state mutations.",
+      "suggested_fix": "Add \"updated_at\": {\"type\": \"string\", \"format\": \"date-time\"} to the schema properties and add it to the required fields array."
+    }
+  ]
+}
