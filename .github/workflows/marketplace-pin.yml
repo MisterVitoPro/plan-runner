@@ -58,8 +58,12 @@ jobs:
         if: steps.ver.outputs.release == 'true'
         run: |
           TAG="v${{ steps.ver.outputs.new }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists -- leaving it as-is."
+          # Query the REMOTE, not the local clone: the checkout above is shallow
+          # (fetch-depth: 2) and never fetches tags, so `git rev-parse "$TAG"`
+          # can never see a tag that exists only on the remote, and the push
+          # below then fails with "already exists".
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "Tag $TAG already exists on the remote -- leaving it as-is."
           else
             # An annotated tag needs a committer identity; the runner has none.
             git config user.name  "github-actions[bot]"
