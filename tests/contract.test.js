@@ -225,6 +225,37 @@ test("SKILL selects an execution backend (Claude Agent Teams vs native subagents
   assert.match(f, /per-wave barrier|wave barrier/i, "both backends must keep the per-wave barrier");
 });
 
+test("a CI guard blocks private infrastructure identifiers from reaching tracked files", () => {
+  // This pin exists because the rule was broken once and the remedy cost the
+  // repository its history: a real internal hostname shipped inside an example
+  // comment, survived in refs/pull/<n>/head after a squash merge, and could only
+  // be removed by deleting and recreating the repo.
+  const script = read("scripts/check-no-private-identifiers.js");
+  assert.match(script, /ALLOWED_HOSTS/, "the guard keeps an explicit host allow-list");
+  assert.match(script, /IPV4/, "the guard scans for IPv4 literals");
+  assert.match(script, /EMAIL/, "the guard scans for email addresses");
+  assert.match(script, /process\.exit/, "the guard fails the build rather than only warning");
+
+  const ci = read(".github/workflows/ci.yml");
+  assert.match(
+    ci,
+    /node scripts\/check-no-private-identifiers\.js/,
+    "CI runs the private-identifier guard"
+  );
+
+  const rules = read("CLAUDE.md");
+  assert.match(
+    rules,
+    /Never commit a private infrastructure identifier/,
+    "the rule is stated for anyone working in this repo, not only enforced after the fact"
+  );
+  assert.match(
+    rules,
+    /must be a placeholder/,
+    "the rule tells a dispatcher to require a placeholder when handing an agent a real endpoint"
+  );
+});
+
 test("release metadata and contract pins are synchronized at 2.2.0", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));

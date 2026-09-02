@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: No private infrastructure identifiers
+        run: node scripts/check-no-private-identifiers.js
       - name: Contract tests
         run: node --test tests/contract.test.js
       - name: Validate manifests and synchronized versions

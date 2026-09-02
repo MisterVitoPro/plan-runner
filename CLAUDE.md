@@ -31,6 +31,29 @@ Caveats: the `.claude-plugin/plugin.json` `description` field is especially impo
 
 The workflow authenticates to `esper` with the `MARKETPLACE_DEPLOY_KEY` repo secret — the private half of an SSH deploy key registered with write access on that repo (scoped to it alone, not a personal PAT). Without it the release merge fails at the marketplace step. It fires only on a version change, so non-release merges are a no-op. If you ever need to pin a specific older `sha` (not the merge commit), edit `marketplace.json` by hand instead. A release is not live until the marketplace bump lands (now: until the workflow run succeeds).
 
+## Never commit a private infrastructure identifier
+
+Committed text uses placeholders. A real hostname, IP address, or personal email must
+never reach a tracked file, **including inside a comment, a test fixture, or an example**.
+Use `localhost`, `example.com`, or an obviously fictional name like `stub-endpoint`.
+
+This is enforced by `scripts/check-no-private-identifiers.js`, which runs first in CI and
+is pinned by a contract test. If a host is genuinely public and belongs in the repo, add
+it to that script's `ALLOWED_HOSTS` with a reason, rather than working around the check.
+
+The rule exists because it was broken. Implementing local-endpoint dispatch, an agent was
+handed a real, working endpoint as ground truth so it would build against the actual wire
+format instead of guessing. That was correct for the code and wrong for the comment: it
+used the live host as its example, and the value shipped in a public release. Removing it
+afterwards was not a one-line fix. The hostname survived in the branch history and in
+`refs/pull/<n>/head`, which GitHub serves even after a squash merge and a branch deletion,
+so the only complete remedy was deleting and recreating the repository, which cost it 126
+commits, 31 pull requests, and every tag before `v2.2.0`.
+
+**When dispatching an agent that needs a real endpoint, give it the real value for
+behavior and state explicitly that any committed example must be a placeholder.** The
+agent will otherwise, and reasonably, treat the value it was given as the canonical one.
+
 ## Honesty invariants (never weaken these)
 
 - **Token accounting is best-effort.** Never fabricate a token count. Unreported agents get `null` plus coverage counters (`agents_reported`/`agents_total`/`complete`). Any new stat surfaced anywhere (dashboards, Token Report, PR body) sums non-null values only and labels partial coverage as a lower bound.
