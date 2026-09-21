@@ -2,20 +2,20 @@
 
 ![version](https://img.shields.io/github/v/tag/MisterVitoPro/plan-runner?label=version&color=blue)
 
-Take a free-form Markdown implementation plan and execute it as a dependency-ready task DAG of parallel agents -- each task in its own disposable Git worktree, independently verified, and applied to a run-owned integration branch only by a central integrator -- with durable recovery evidence, bug-driven re-planning, and a human-reviewed pull request at the end. Works in Claude Code and Codex; falls back to verified file-disjoint waves when Git is unavailable.
+Take a free-form Markdown implementation plan and execute it as a dependency-ready task DAG of parallel agents -- each task in its own disposable Git worktree, independently verified, and applied to a run-owned integration branch only by a central integrator -- with durable recovery evidence, bug-driven re-planning, and a human-reviewed pull request at the end. Works in Claude Code and Codex. Requires Git.
 
 Pairs with the [ideas](https://github.com/MisterVitoPro/ideas) plugin as the pipeline front door: its interview skill turns a raw idea into an audited spec and emits a plan-runner-ready plan for the run skill. The two install side by side; Ideas complements Plan Runner, it does not replace it.
 
 ## What it does
 
-1. **Analyze.** A `plan-analyzer` agent turns the plan into a dependency-ready task graph with stable task IDs. DAG mode is the default; it keeps the existing six-task concurrency ceiling.
+1. **Analyze.** A `plan-analyzer` agent turns the plan into a dependency-ready task graph with stable task IDs. The task DAG is the only executor; at most six tasks run at once.
 2. **Confirm.** You see the task graph / execution plan before any dev work runs.
-3. **Execute tasks.** Each ready task runs in its own disposable Git worktree based on the integration commit that satisfies its dependencies. After deterministic checks and independent verification, only the central integrator applies an accepted task to the run-owned integration branch; unrelated ready tasks do not wait for one another.
+3. **Execute tasks.** Each ready task runs in its own disposable Git worktree based on the integration commit that satisfies its dependencies. After deterministic checks and independent verification, only central integration applies an accepted task to the run-owned integration branch; unrelated ready tasks do not wait for one another, and a task with blocking findings gets one repair attempt before it (and the tasks behind it) is blocked.
 4. **Aggregate.** A `plan-aggregator` agent collects every verifier-flagged bug, deduplicates, ranks by severity (P0-P3), and writes both a `bugs.md` audit and a `fix-plan.md` (a new plan ready for re-runs).
 5. **Re-run prompt.** You decide whether to auto-handoff to a fresh-context subagent that runs the generated `fix-plan.md` for cycle 2.
-6. **Deliver.** Once every required task is integrated and the final full-suite verification boundary passes, the run pushes the integration branch and opens (or updates) a pull request for human review. Plan Runner never merges.
+6. **Deliver.** Once every task is integrated or blocked and the final full-suite verification passes, the run pushes the integration branch and opens (or updates) a pull request for human review. Plan Runner never merges.
 
-Bundled roles, each loaded relative to the active skill: `plan-analyzer` (read-only graph analysis), `plan-test-author` and `plan-dev` (test-first and implementation work), `plan-verifier` (independent, read-only verification), `plan-integrator` (DAG mode only: ownership, stale-base, and evidence checks before serially applying a task commit), and `plan-aggregator` (bug dedup, ranking, and fix-plan generation).
+Bundled roles, each loaded relative to the active skill: `plan-analyzer` (read-only graph analysis), `plan-test-author` and `plan-dev` (test-first and implementation work), `plan-verifier` (independent, read-only verification), `plan-integrator` (the central-integration protocol the scheduler follows, and the agent that adjudicates an integration conflict), and `plan-aggregator` (bug dedup, ranking, and fix-plan generation).
 
 ## Install
 
@@ -45,8 +45,8 @@ The plan can be any Markdown file with task content. There is no required schema
 
 ## Configuration file
 
-Every persistent setting below -- execution mode, verification coverage, phasing,
-project-agent dispatch, model configuration -- lives in one optional
+Every persistent setting below -- execution mode, verification coverage, gate
+budgets, phasing, project-agent dispatch, model configuration -- lives in one optional
 `.plan-runner.yml` committed at the repo root. Pre-flight reads that file exactly
 once, before any setting resolves, and prints what it found:
 
@@ -61,79 +61,87 @@ installed. If the second line appears in a repo that does have a
 `.plan-runner.yml`, the run is silently using defaults for every setting -- treat
 it as a bug and report it.
 
-## DAG execution and fallback
+## Task-DAG execution
 
-`execution.mode` defaults to `dag` (since 2.0.0). The executor is chosen at pre-flight,
-with precedence `--execution-mode <dag|wave>` flag > `.plan-runner.yml` `execution.mode`
-> default `dag`, and the choice is printed once:
-`Execution mode: <mode> (from <flag | .plan-runner.yml | default>).`
+The task DAG is plan-runner's only executor (since 3.0.0). There is no wave executor, no
+wave barrier, and no fallback: a task starts the moment the tasks it depends on are
+integrated, without waiting for unrelated work. `--execution-mode wave` and
+`execution.mode: wave` stop the run with an error; the other wave-era flags (`--verify`,
+`--sync-verify`, `--execution-mode dag`) are accepted and ignored.
 
-```yaml
-execution:
-  mode: dag # default; set wave for the explicit rollback executor
-phasing:
-  max_integrations_per_phase: 4 # DAG checkpoint boundary (default 4)
-```
-
-**Preflight.** DAG mode requires Git plus usable worktrees, probed without touching
-your checkout (a throwaway detached worktree is created and removed). If the probe
-fails, Plan Runner prints `DAG execution unavailable (<reason>) -- falling back to the
-legacy wave executor.` and runs the wave pipeline instead; it never approximates task
+**Preflight.** plan-runner requires Git with usable worktrees, probed without touching
+your checkout (a throwaway detached worktree is created and removed). Without Git, a
+first commit, or worktree support it stops, changes nothing, and tells you how to prepare
+the directory (`git init`, a `.gitignore`, one commit); it never approximates task
 worktrees on a shared tree. The checkout must be clean: a dirty tree gets a single
 explicit `[s]tash / [a]bort` prompt, never a silent stash, discard, or "continue anyway".
 It then captures `base_ref`, creates a run-owned integration branch named
 `plan-runner/<YYYY-MM-DD>/cycle-<N>` at that commit in a dedicated worktree outside your
 checkout, and writes `task-graph.json`, `run-state.json`, and an empty `events.jsonl`.
-Your active branch is never checked out, committed to, reset, or merged by a DAG run.
+Your active branch is never checked out, committed to, reset, or merged.
 
-**Scheduling.** The analyzer's output must validate both the wave-plan and task-graph
-schemas: stable, unique task IDs; acyclic dependency edges that preserve every ordering
-the plan declares; owned files, acceptance criteria, recommended model, TDD role, and a
-verification scope per task. Any validation failure stops the run before dispatch --
-a missing edge or completion is never inferred. A task becomes ready the moment every
-dependency it declares is `integrated`; it does not wait for unrelated work. At most six
-dev tasks are active at once, and two active tasks never share an owned (or declared
-shared) file. Each dispatched task gets its own branch and detached worktree rooted at
-the integration commit that satisfied its dependencies, and its agent may write only its
-declared owned files plus its file-backed return artifact.
+**Worktree bootstrap.** A fresh worktree contains only what Git tracks, so installed
+dependencies and build caches are missing from it and every task's tests would reinstall,
+cold-build, or fail to start. plan-runner links untracked directories from your checkout
+into each new worktree instead, and can run a setup command once per worktree:
 
-**Verify, then integrate.** When a task returns, it gets scoped deterministic checks
-(its tests) and an independent `plan-verifier` pass -- a task never verifies itself.
-Only `plan-integrator` mutates the integration branch, and it first compares the task
-commit's complete diff (added, deleted, renamed, copied, generated, and shared files)
-against declared ownership; an undeclared write rejects the task with durable evidence.
-If intervening integrations touched the task's owned files or verification inputs, the
-task is re-executed in a fresh worktree on the current integration commit rather than
-integrated blindly. The full suite runs at dependency-frontier boundaries and once more
-before the PR.
+```yaml
+# .plan-runner.yml
+worktree:
+  setup: ""       # e.g. "npm ci --prefer-offline"; run once in every new worktree
+  share: auto     # auto (default) | none | [node_modules, target, web/node_modules]
+```
 
-**Bounded repair.** Actionable findings from checks or verification earn exactly one
-evidence-backed repair attempt; a second failure marks the task `blocked`. An
-integration conflict rebuilds the task worktree at the current integration commit and
-retries once; a second conflict blocks. A blocked task's dependents are recorded as
-blocked too (never run speculatively), and every block flows through the normal
-bugs -> fix-plan -> re-run loop.
+`share: auto` links whichever of `node_modules`, `.venv`, `venv`, and `vendor` exist at
+the repository root and are untracked. List build-output directories such as `target`
+explicitly, and only when concurrent builds sharing them are safe for your toolchain
+(cargo serializes on a lock and keeps the cache warm). Links are excluded from every task
+commit.
+
+**Scheduling.** The analyzer returns a task graph and nothing else: stable, unique task
+IDs; acyclic dependency edges that preserve every ordering the plan declares; owned
+files, acceptance criteria, recommended model, TDD role, and a verification scope per
+task. Any validation failure stops the run before dispatch -- a missing edge or
+completion is never inferred. At most six dev tasks are active at once, two active tasks
+never share an owned (or declared shared) file, and among ready tasks the one with the
+most work waiting behind it goes first. The scheduler advances on durable files (agent
+returns, verdicts, gate exit markers) and never idles on a notification.
+
+**One task's pipeline.** Reserve its paths and create its worktree at the integration
+commit that satisfies its dependencies; dispatch its agent, which may write only its
+declared files (and may run its own targeted tests there -- never as evidence); the
+scheduler commits the work and compares the complete diff (added, deleted, renamed,
+copied, generated, shared) against declared ownership; its gates run inside that
+worktree; an independent `plan-verifier` reads the same pinned tree. A task never
+verifies itself.
+
+**Integrate, repair once, or block.** A P0 or P1 finding, an ownership failure, a failed
+deterministic check, or a missing verdict blocks integration; P2 and P3 findings ride
+along to the fix-plan so a nit never costs the tasks behind it their turn. Blocking
+findings earn exactly one evidence-backed repair attempt; a second failure marks the task
+`blocked`, and its dependents with it (never run speculatively). Integration is central,
+serial, and mechanical -- an ownership re-check, a stale-base comparison, and a
+cherry-pick onto the run-owned branch -- so no agent sits behind every task; the
+`plan-integrator` role is dispatched only to adjudicate a conflict, which gets one rebuild
+before it blocks. If intervening integrations touched a task's files or verification
+inputs, the task is re-executed on the current integration commit rather than integrated
+blindly.
 
 **Durable evidence.** `run-state.json` holds one authoritative record per task
 (`depends_on`, status, attempts, base/produced/integrated commits, worktree path,
 verification artifact paths, block reason); `events.jsonl` gains exactly one
-schema-validated line per transition (`task_dispatched`, `task_retry_requested`,
-`task_verified`, `task_integrated`, `task_blocked`, `checkpoint`, `resume`) and is
-never rewritten. Phasing counts successful integrations, not waves (see "Phasing large
-plans"), and resume reads only this evidence (see "Resuming a run"). Task branches and
-worktrees are removed once their final evidence is durable; graph, state, events,
-returns, test output, and verifier artifacts stay in the cycle directory.
-
-**Rollback.** `--execution-mode wave` (or `execution.mode: wave` in `.plan-runner.yml`)
-selects the legacy wave executor explicitly: file-disjoint waves of at most six agents,
-a barrier per wave, one commit per wave on your current branch, and pipelined per-wave
-verification. It is also the automatic path whenever Git or worktrees are unavailable.
-No-Git mode never attempts task worktree dispatch, commits, branch changes, or PR
-creation; it preserves the wave pipeline and its local artifacts for review.
+schema-validated line per transition (`paths_reserved`, `task_dispatched`,
+`task_retry_requested`, `task_verified`, `task_integrated`, `task_blocked`,
+`paths_released`, `checkpoint`, `resume`, `final_verification`) and is never rewritten.
+Every run writes them, so every run is resumable. Task branches and worktrees are removed
+once their final evidence is durable; graph, state, events, returns, gate logs, ownership
+evidence, and bug reports stay in the cycle directory.
 
 ## Subagent backends
 
-Plan Runner loads each bundled role definition relative to the active skill and dispatches it through the host's native subagent facility. This works in both Claude Code and Codex without depending on automatic registration of files under `agents/`.
+Plan Runner resolves each bundled role definition relative to the active skill and dispatches it through the host's native subagent facility. This works in both Claude Code and Codex without depending on automatic registration of files under `agents/`.
+
+**Nothing bulky is typed into a prompt (since 3.0.0).** Every character of a subagent prompt is generated by the orchestrator, token by token, before that subagent can start, and then stays in the orchestrator's context. So the orchestrator hands over file paths instead of text: a bundled role is delivered as `ROLE DEFINITION: read <absolute path> ...` (pasted inline only as a fallback, when a sandboxed subagent cannot read the plugin directory), the plan reaches the analyzer as a numbered file (`plan.numbered.txt`), and test output reaches the verifier as gate-log paths. Two dispatches still paste definition text, deliberately: a project agent's definition (its position above the overriding contract is part of the guard) and an HTTP endpoint dispatch (the model has no tools to read a file with).
 
 Claude Code additionally supports its experimental **Agent
 Teams** orchestration and uses it when available:
@@ -145,21 +153,17 @@ Teams** orchestration and uses it when available:
   self-claim dispatched tasks from a shared task list and report via the team
   mailbox, so the lead's context stays lean instead of accumulating every agent's
   full JSON return.
-- **Same safety contract.** The executor's rules do not depend on the backend. In
-  DAG mode a teammate runs one task inside that task's disposable worktree, never
-  touches the integration branch or your checkout, and its commit is applied only
-  by the central integrator after deterministic checks and independent
-  verification. In wave mode the per-wave dev barrier is unchanged: dispatch a
-  wave -> wait for all -> run TDD gates -> commit -> next wave, with the wave's
-  verifier dispatched right after the commit and its verdict captured while the
-  next wave runs (pipelined). File-disjoint tasks and waves (already produced by
-  the analyzer) satisfy the Agent Teams "each teammate owns different files"
-  requirement.
+- **Same safety contract.** The executor's rules do not depend on the backend. A
+  teammate runs one task inside that task's disposable worktree, never touches the
+  integration branch or your checkout, and its commit is applied only by central
+  integration after deterministic checks and independent verification. Tasks that are
+  active at the same time never share a file, which satisfies the Agent Teams "each
+  teammate owns different files" requirement.
 - **Verifier-gated integration.** Because the team task status lags, the lead waits
   on the verifier's actual result (its file-backed return, not a status poll)
-  before integrating a task or closing a wave, and never substitutes its own
+  before integrating a task, and never substitutes its own
   reading of the code for the verifier's verdict. If a verdict never lands the
-  task or wave is marked `UNVERIFIABLE` and routed through the fix-plan loop. A
+  task is marked `UNVERIFIABLE` and routed through the fix-plan loop. A
   coverage gate before aggregation backfills any missing verdict, so a PR can never
   open while a verifier is still outstanding.
 - **Fallback.** Codex always uses native subagents. If the variable is not set in Claude Code (or the build is older than 2.1.178),
@@ -173,12 +177,12 @@ Teams** orchestration and uses it when available:
   `stop` mode.
 - **No idle agents.** A finished dev agent or verifier does not exit on its own --
   the lead explicitly tears it down (background task or teammate) the moment its
-  result is captured, task by task or wave by wave, so agents never sit idle for
+  result is captured, task by task, so agents never sit idle for
   the rest of the run.
 
 ## Project-agent dispatch
 
-A dev dispatch (a DAG task, or a wave agent in wave mode) can be served by a
+A dev dispatch can be served by a
 target repo's own specialized agent (a frontend expert, a Rust expert) instead
 of the bundled generic `plan-dev`, when the repo ships one that clearly fits. This is on by default; verifier,
 test-author, and aggregator dispatches always use their bundled definitions
@@ -245,7 +249,7 @@ entirely when a manifest predates the field, never inferred).
   ```
 
 - Precedence: `--no-project-agents` flag > `.plan-runner.yml`
-  `agents.project` > default (`true`), the same pattern as `--verify`.
+  `agents.project` > default (`true`).
 
 ## Token accounting
 
@@ -258,13 +262,12 @@ the PR stats.
 
 At the end of every run (both the clean path and the bugs-found path) plan-runner
 prints one **Run Report**: a status-aware title, a two-column at-a-glance stat
-header (dev agents, verifiers, commits, duration, tokens, coverage, bugs, plus
-task outcomes in DAG mode or the wave count in wave mode), then detail tables -- a per-phase token table (Analyze / Dev / Verify / Aggregate)
+header (tasks, dev agents, verifiers, repairs, duration, tokens, coverage, bugs), then detail tables -- a per-phase token table (Analyze / Dev / Verify / Aggregate)
 with input, output, and total sums, a per-phase reported-coverage column, and a
 top-consumers line naming the most expensive subagents; a per-phase timing table;
 and an artifacts block. Partial token coverage is flagged as a lower bound and any
-unverified tasks or waves are called out, both directly under the stat header. In
-DAG mode the manifest additionally carries a `dag` block (base ref, integration
+blocked tasks are called out, both directly under the stat header. The
+manifest carries a `dag` block (base ref, integration
 branch and its ownership, event-log path, final-verification status, and one
 outcome record per task with its retry/block evidence). The PR body
 carries a compact per-phase token breakdown under its `Tokens:` stat.
@@ -294,20 +297,55 @@ default (no prompt); pass `--no-tdd` to run the classic pipeline instead:
   a `red_run` (the new test failed before implementation) and a `green_run`
   (it passed after).
 - **Non-testable tasks** (docs, config, schemas) run as before, with static
-  verification only. The analyzer labels them and shows the reason in the wave
+  verification only. The analyzer labels them and shows the reason in the task
   plan.
 - The **red gate** requires the new tests to fail for a genuine reason
   (import / not-implemented / assertion) while pre-existing tests stay green;
   a syntax/collection error is an invalid red and is flagged as a bug.
-- **DAG mode:** a task whose scoped checks or independent verification return
-  actionable findings gets exactly one evidence-backed repair attempt in its
-  worktree; if that also fails the task is `blocked` (with its dependents), never
-  integrated, and the findings flow through the aggregate -> fix-plan -> re-run
-  loop.
-- **Wave mode:** gate failures are not retried inline -- the impl agent aims for
-  a green full-suite, but a wave whose gate fails is **still committed** (marked
-  `BUGS_FOUND`); the failures become bugs that flow through the same loop and
-  are resolved on the next cycle.
+- **An invalid red is repaired, not deferred.** New tests that pass before any
+  implementation exists fail the test-author task's gate: it gets its one repair
+  attempt, and only if that also fails is it blocked (with the impl task that depends
+  on it).
+- **Bounded repair.** A task whose gates or independent verification return blocking
+  findings (P0/P1, an ownership failure, a failed check) gets exactly one
+  evidence-backed repair attempt in its worktree; if that also fails the task is
+  `blocked` (with its dependents), never integrated, and the findings flow through
+  the aggregate -> fix-plan -> re-run loop. P2 and P3 findings never block.
+- **Agents check their own work.** Each task owns its worktree, so an impl agent may
+  run its own targeted tests, and a test author may confirm its red, before returning.
+  Those runs are never evidence: the orchestrator re-runs the gate of record.
+
+**Gate discipline (since 3.0.0).** Gates, not agents, dominated the wall-clock
+of long runs, so every test command the orchestrator runs follows four rules:
+
+- **File-backed.** Output goes to a log under the cycle's `gates/` directory;
+  the verifier reads the log by path. Test output is never streamed into the
+  orchestrator's context or re-typed into a prompt.
+- **Budgeted.** A gate that exhausts its budget is killed and recorded
+  `TIMEOUT` -- evidence that it did not finish, never a pass and never a
+  fabricated failure list.
+- **Waited on in the foreground.** A gate is never backgrounded behind a
+  monitor while the agent ends its turn: a subagent that returns is never woken,
+  which is how one phase runner once sat idle for four hours on a gate that had
+  already finished.
+- **Honest when it did not run.** A suite that fails to build or collect is
+  recorded `BUILD_FAILED`, never as an empty failure list that would read as
+  "no regressions"; a baseline that did not run labels every later suite block
+  `BASELINE DID NOT RUN`.
+
+```yaml
+# .plan-runner.yml
+gates:
+  targeted_timeout_minutes: 10   # budget for one single-file red/green or scoped run
+  suite_timeout_minutes: 30      # budget for one full-suite run (baseline, boundary suite, final verification)
+```
+
+Gates run inside the task's own worktree, the only tree that contains that task's work
+and nobody else's unfinished edits. Each task runs its targeted red or green gate plus
+scoped checks over its `verification_scope`; the full suite runs only for the baseline,
+at phase boundaries, and as the final verification. If the baseline itself cannot build
+or finish, a gate that cannot build is recorded rather than blocking the task -- which is
+what lets a repair plan run against a codebase that does not compile yet.
 
 The test command is resolved as: `--test-cmd "<cmd>"` flag, else auto-detection
 from repo markers (`package.json`, `pytest`, `go.mod`, `Cargo.toml`, `*.csproj`,
@@ -318,18 +356,11 @@ points you to `--no-tdd`.
 - `--no-tdd` -- disable TDD and run the classic (non-TDD) pipeline (TDD is on by default).
 - `--test-cmd "<cmd>"` -- supply the test command explicitly; use `{file}` for
   single-file runs (e.g. `pytest {file}`).
-- `--verify <mode>` -- verification coverage: `per-agent`, `per-wave` (default), or
-  `last-wave-only`. Overrides `.plan-runner.yml`.
-- `--sync-verify` -- disable pipelined verification and wait for each wave's verdict
-  before the next wave starts (the pre-1.14 behavior). Overrides `.plan-runner.yml`.
-- `--execution-mode <dag|wave>` -- pick the executor for this run. Overrides
-  `.plan-runner.yml` `execution.mode`; `dag` is the default and `wave` is the
-  explicit rollback to the legacy wave executor. See "DAG execution and fallback".
-- `--phase-size <N>` -- override `phasing.max_waves_per_phase` (wave mode) for this
-  run. See "Phasing large plans" below.
+- `--phase-size <N>` -- override `phasing.max_integrations_per_phase` for this run. See
+  "Phasing large plans" below.
 - `--phase-mode <relay|stop>` -- override `phasing.mode` for this run.
-- `--no-phasing` -- disable wave-mode phasing entirely and run the whole plan in
-  one session, regardless of plan size or `.plan-runner.yml` (the phasing kill
+- `--no-phasing` -- disable phasing entirely and run the whole graph in
+  one scheduler session, regardless of plan size or `.plan-runner.yml` (the phasing kill
   switch).
 - `--resume [run-state path]` -- resume an interrupted run from its durable state.
   See "Resuming a run" below.
@@ -339,8 +370,9 @@ points you to `--no-tdd`.
   run; every role resolves exactly as it did before this feature (the model-policy
   kill-switch). Precedence: `--no-model-config` flag > `.plan-runner.yml`
   `models.enabled` > default.
-- `--verbose` -- ask the analyzer for per-wave `rationale` and per-agent
-  `complexity_signals` in its output.
+- `--verbose` -- ask the analyzer for per-task `complexity_signals` in its output.
+- Removed in 3.0.0: `--verify`, `--sync-verify`, and `--execution-mode dag` are accepted
+  and ignored; `--execution-mode wave` stops the run (the wave executor is gone).
 
 ## Model configuration
 
@@ -447,7 +479,7 @@ completion budget; a still-failing retry is a durable `BLOCKED`, never a
 silent fallback to a host subagent or a hosted model -- degrading would move
 source code off the operator's machine, the one outcome this feature exists to
 prevent. Its work is still graded by an independent, host-dispatched verifier
-like any other dev agent in the wave.
+like any other task.
 
 **Request passthrough.** `models.endpoint.request` overrides the dispatch
 driver's own defaults -- a 240-second timeout (kept under the ~300-second
@@ -465,85 +497,54 @@ available model instead. This gate fires at most once per run. On an unattended
 run (no structured input available), plan-runner degrades to the closest
 available model, records the substitution, and continues rather than blocking.
 
-## Verification coverage
+## Verification
 
-plan-runner verifies work with an independent, read-only verifier agent that
-never shares a definition with the code's author. In DAG mode every task is
-verified before the integrator will accept it, so coverage is total by
-construction. In wave mode, how much verification runs is configurable via
-`verify_mode`:
+Verification is not configurable: every task attempt gets one independent `plan-verifier`,
+because a task cannot integrate without a verdict. It costs the scheduler nothing to wait
+for -- the verifier reads the task's own worktree, which nothing else writes to, while
+other tasks keep moving. The orchestrator never substitutes its own judgment for a
+verdict: a missing verdict is recorded `UNVERIFIABLE`, blocks that task, and flows through
+the fix-plan loop. A verdict that arrives late is reconciled by union of findings, never
+discarded, and can never un-integrate a task. `--verify`, `--sync-verify`,
+`verification.mode`, and `verification.pipelined` belonged to the removed wave executor
+and are ignored.
 
-- `per-agent` -- one verifier per dev agent, every wave (highest scrutiny, most tokens).
-- `per-wave` -- one verifier per wave, every wave. **Default**; the historical behavior.
-- `last-wave-only` -- one verifier on the final wave only; earlier waves are recorded
-  `SKIPPED`. The cheapest mode.
-
-Set it persistently in a committed `.plan-runner.yml` at the repo root:
-
-```yaml
-verification:
-  mode: per-wave   # per-agent | per-wave | last-wave-only
-  pipelined: true  # default true; false = wait for each verdict before the next wave
-```
-
-or per-run with `--verify <mode>` (which overrides the file). Precedence:
-`--verify` flag > `.plan-runner.yml` > default (`per-wave`).
-
-**Pipelined verification (wave mode, default since 1.14).** The verifier no
-longer sits between waves: each wave is committed first, then its verifier is dispatched
-against a read-only snapshot worktree pinned to that commit and runs while the
-next wave's dev agents work. Every verdict still lands before aggregation -- an
-end-of-range drain waits for stragglers, and the coverage gate backfills
-`UNVERIFIABLE` for anything that never landed -- so the honesty guarantees are
-unchanged; only the waiting moved. Runs without git, waves with nothing to
-commit, and `--sync-verify` / `pipelined: false` runs verify synchronously as
-before. TDD gates also got cheaper: the full suite runs once per wave for the
-regression diff instead of once per gated agent.
-
-`SKIPPED` is an intentional, transparent absence -- distinct from `UNVERIFIABLE`
-(a *requested* verdict that never landed, still routed through the fix-plan loop).
-A BLOCKED dev agent on a skipped wave still surfaces a P0. Any run that leaves
-tasks or waves unverified opens its PR as a **draft** with a warning banner, and
-the "no bugs found" summary says so -- reduced coverage never masquerades as a
-clean bill.
+The full suite runs rarely, by design: once for the baseline (in the integration worktree,
+before any task), once at each phase boundary, and once as the final verification. Each
+task is covered by its targeted gate plus scoped checks over its `verification_scope`,
+where a regression is attributable and repairable. The final verification gates delivery:
+a run whose integrated branch fails, or cannot run, the full suite opens no PR, and a run
+with blocked tasks opens its PR as a **draft** with a banner naming them.
 
 ## Phasing large plans
 
-Large plans (40+ tasks, ~10-15 waves) can run in one long-lived orchestrator
-session, and that session's host-process memory is never freed -- on
-constrained machines it can crash before the run finishes. Phasing splits an
-oversized wave plan into sequential phases so that memory can be reclaimed at
-phase boundaries.
+A large plan run in one long-lived scheduler session grows that session's context and
+host-process memory without bound -- on constrained machines it can crash before the
+run finishes. Phasing bounds it so memory can be reclaimed at phase boundaries.
 
-- **DAG mode boundary.** A DAG run checkpoints after a configured number of
-  *successful task integrations* -- `phasing.max_integrations_per_phase`
-  (default `4`) is the only DAG phase boundary; waves and dispatches are never
-  counted. At the boundary the scheduler drains already-active task returns to
-  durable state, writes a `checkpoint` event naming the next task to resume,
-  and then applies the same relay/stop rules and wall-time guardrail described
-  below.
-- **Wave mode threshold.** Phasing only activates once the sliced wave plan has
-  more waves than `max_waves_per_phase` (default `4`). At or under the threshold
-  the run proceeds exactly as before -- no phase directories, no run-state
-  file, nothing changes.
+- **Boundary.** A run checkpoints after a configured number of *successful task
+  integrations* -- `phasing.max_integrations_per_phase` (default `12`) is the only
+  phase boundary; dispatches are never counted, and there are no waves to count. At
+  the boundary the scheduler drains already-active task pipelines to durable state,
+  runs the full suite once in the integration worktree, writes a `checkpoint` event
+  naming the next task, and then applies the relay/stop rules and wall-time guardrail
+  described below. A graph with no more tasks than the boundary runs in one session.
 - **Defaults**, configurable in `.plan-runner.yml`:
 
 ```yaml
 phasing:
   enabled: true                   # default true
-  max_waves_per_phase: 4          # wave mode boundary, default 4
-  max_integrations_per_phase: 4   # DAG mode boundary, default 4
+  max_integrations_per_phase: 12  # integrations per phase, default 12
   mode: auto                      # auto (default) | relay | stop
   auto_stop_phases: 3             # auto mode: relay up to this many phases, stop above
   relay_max_minutes: 90           # relay guardrail: force stop at the next boundary past this
 ```
 
-  Precedence for each setting is flag > `.plan-runner.yml` > default, the same
-  pattern as `--verify`.
+  Precedence for each setting is flag > `.plan-runner.yml` > default.
 - **Relay vs. stop -- the honest memory trade-off.** In `relay` mode, a driver
   session stays alive across phase boundaries and dispatches each phase as its
   own subagent; the driver only ever keeps that phase's compact summary, never
-  the underlying wave-by-wave agent transcripts, so the driver's *context*
+  the underlying task-by-task agent transcripts, so the driver's *context*
   stays lean. But the driver's host process itself is never restarted, so its
   memory footprint can still grow over a long run. `stop` mode is the
   complete fix: each phase runs to completion in its own session, that
@@ -566,16 +567,27 @@ phasing:
   context-size optimization, not the memory fix by itself; it's the wall-time
   guardrail, not the small payload, that keeps a long relay run from creeping
   toward the process-memory ceiling.
-- **Kill switch.** `--no-phasing` disables wave-mode phasing entirely and runs
+- **A returned runner is never waited on.** If a relayed phase
+  runner returns anything other than its phase summary -- a progress note,
+  "waiting on the gates" -- the driver treats it as a premature return and
+  recovers at once (continuing the same runner, or dispatching a fresh one that
+  continues from the durable task state), at most twice per phase, before falling
+  back to the normal interrupted-phase path. Phase runners and resumed sessions
+  all load the TDD baseline, test command, and resolved
+  gate settings from the cycle manifest instead of re-running the baseline: a
+  baseline re-captured mid-cycle would absorb earlier phases' regressions as
+  "pre-existing", and costs a full suite run per phase. The token tally is
+  durable -- appended to the one cycle manifest as each agent's usage is captured --
+  so a lost session's agents still count toward coverage.
+- **Kill switch.** `--no-phasing` disables phasing entirely and runs
   the whole plan in one session regardless of size or config, restoring the
   pre-phasing behavior.
 
 ## Resuming a run
 
-plan-runner checkpoints to a `run-state.json` at the cycle root: every DAG run
-writes it at preflight and updates it at every task state transition (alongside
-the append-only `events.jsonl`), and every phased wave run updates it after every
-wave. That checkpoint makes it possible to pick a run back up after a planned
+plan-runner checkpoints to a `run-state.json` at the cycle root: every run
+writes it before the first dispatch and updates it at every task state transition
+(alongside the append-only `events.jsonl`). That checkpoint makes it possible to pick a run back up after a planned
 `stop`-mode boundary, a guardrail-forced stop, or a crash.
 
 - **`--resume [run-state path]`.** With a path, resumes that specific
@@ -597,9 +609,7 @@ wave. That checkpoint makes it possible to pick a run back up after a planned
   found under `<docs_base>/plan-runner/`, plan-runner offers to resume it before
   starting the new run; declining marks that run-state abandoned so it isn't
   offered again.
-- **DAG recovery.** A checkpoint whose state says `dag.mode: "dag"` takes a
-  dedicated resume path that never reinterprets task state as waves. Before
-  dispatching anything it validates the whole run-state against its schema,
+- **Recovery.** Before dispatching anything, resume validates the whole run-state against its schema,
   checks that the run-owned integration branch and base ref still exist (and
   that the base is an ancestor of the branch), re-validates `task-graph.json`
   against the recorded task set, and replays every `events.jsonl` line as audit
@@ -610,30 +620,25 @@ wave. That checkpoint makes it possible to pick a run back up after a planned
   and verification artifacts; blocked tasks stay blocked. Any mismatch,
   malformed line, or missing record is a safe stop that leaves the checkpoint
   intact for inspection -- completion is never inferred from Git history.
-- **Wave crash recovery.** Resume re-enters at the last completed wave. It never
-  assumes partial or uncommitted work from an interrupted wave is done, and
-  re-runs that wave from its start. If git is available and the working tree
-  is dirty, it asks once whether to stash first or let the wave's agents
-  overwrite files as needed. If the plan file has changed since the run was
-  checkpointed (by content hash), it warns and requires explicit confirmation
-  before continuing -- resuming replays the checkpointed wave plan, it does
-  not re-analyze the edited plan.
-- Unphased wave runs (below the phasing threshold, or run with `--no-phasing`)
-  write no run-state and are never resumable -- there is nothing to
-  checkpoint, so re-invoking just starts a fresh run.
+- **What resume never does.** It never re-captures the TDD baseline (a baseline
+  re-captured mid-cycle would absorb integrated tasks' regressions as pre-existing),
+  never asks about your working tree (the run never wrote to it; an interrupted
+  task's partial work lives only in its disposable worktree), and never spends a
+  task's repair budget on an agent that was lost with its session. If the plan file
+  has changed since the run was checkpointed (by content hash), it warns and requires
+  explicit confirmation before continuing -- resuming replays the checkpointed task
+  graph, it does not re-analyze the edited plan.
+- A checkpoint written by the removed wave executor (no `dag` state) cannot be
+  resumed; start a fresh run on its plan.
 
 ## Code Atlas sync
 
-Right before opening the PR, plan-runner keeps a [code-atlas](../code-atlas)
-architecture index in sync with what the cycle just built. If `.code-atlas/state.json`
-is present (Code Atlas is installed and has been mapped), it invokes the Code Atlas update skill
-with no arguments -- the update diffs file hashes against the cycle's committed changes and
-refreshes only what changed, auto-selecting its depth (micro / targeted / full). If
-`.code-atlas/` is absent it is skipped silently; plan-runner never auto-runs a full
-Code Atlas map skill. The step is also skipped in no-git mode (the update relies on git).
-The update skill writes only to `.code-atlas/` (gitignored), so it adds nothing to the
-PR diff -- it runs only on the terminal cycle that opens the PR, not on intermediate
-fix-plan re-runs. The outcome is recorded in `manifest.json` under `code_atlas_sync`.
+plan-runner no longer syncs a [code-atlas](../code-atlas) index before opening the PR. A
+run never changes your checkout -- every integrated commit is on the run-owned branch --
+so an incremental update would diff an unchanged tree and index nothing. When
+`.code-atlas/state.json` is present, the run prints a one-line reminder to run the Code
+Atlas update skill after you merge the PR, and records
+`code_atlas_sync: {"ran": false, ...}` in `manifest.json`. It never auto-runs a full map.
 
 ## Pull request
 
@@ -647,15 +652,21 @@ PR already exists for the branch it is updated in place. This is always human-re
 delivery: Plan Runner does **not** auto-merge a pull request. When `gh` is not installed,
 the title and body are printed for manual creation.
 
-## No-git mode
+## Git is required
 
-git is **optional**. At pre-flight, plan-runner runs `git rev-parse
---is-inside-work-tree`; if git is not installed or the working directory is not a git
-repository, it sets `git_available = false` (recorded in `manifest.json`) and skips
-every git operation: no clean-tree check, no task worktrees or integration branch,
-no per-wave commits, and no PR step. The run uses the wave executor (DAG mode needs
-Git), still analyzes, dispatches dev + verifier agents, runs TDD gates, and
-aggregates bugs -- all generated artifacts remain in the cycle directory for review.
+plan-runner requires a Git repository with at least one commit and usable worktrees.
+Every task runs in its own disposable worktree and only verified commits reach a
+run-owned branch; without that isolation, gates cannot run while other agents are
+editing, and nothing proves which task wrote what. Before 3.0.0 a repository without Git
+fell back to a wave executor on the shared working tree; that executor was removed
+(ADR-0011). Pre-flight stops, changes nothing, and prints the three commands that prepare
+a directory:
+
+```
+git init
+(add a .gitignore for build output and dependencies first)
+git add -A && git commit -m "baseline"
+```
 
 ## Output
 
@@ -663,16 +674,17 @@ Per cycle, output lives at:
 
 ```
 <docs_base>/plan-runner/{DATE}/cycle-{N}/    # <docs_base> defaults to docs
-  wave-plan.json         # full analyzer output (task graph + legacy fallback waves)
-  task-graph.json        # validated task/dependency graph (DAG mode)
-  run-state.json         # durable checkpoint: per-task state (DAG) or phase/wave state (phased wave runs)
-  events.jsonl           # append-only task lifecycle evidence (DAG mode)
-  returns/               # file-backed dev and verifier returns (source of truth)
-  bugs/                  # one verifier report per task (DAG) or per wave (wave mode)
+  plan.numbered.txt      # numbered plan copy the analyzer reads (never inlined into a prompt)
+  task-graph.json        # validated task/dependency graph -- the only plan artifact
+  run-state.json         # durable checkpoint: authoritative per-task state + phase boundary
+  events.jsonl           # append-only task lifecycle evidence
+  manifest.json          # the single cycle manifest (token_usage, backend, dag outcomes, tdd evidence)
+  gates/                 # file-backed gate logs: baseline, per-task runs, boundary and final suites
+  ownership/             # per-attempt complete-diff ownership evidence
+  returns/               # file-backed dev, verifier, and integrator returns (source of truth)
+  bugs/                  # one verifier report per task
   bugs.md                # aggregator's human-readable summary
   fix-plan.md            # aggregator's next-cycle input
-  manifest.json          # pipeline metadata (token_usage, backend, dag evidence, ...)
-  phase-{P}/             # phased wave runs only: that phase's slice, bugs/, returns/, manifest
 ```
 
 **Output location detection.** plan-runner resolves the output base `<docs_base>` at pre-flight (before any resume discovery), then writes the cycle tree under `<docs_base>/plan-runner/`. There is no settings key to configure -- resolution is three tiers, in order:
@@ -691,11 +703,11 @@ The resolved value is also recorded as `docs_base` in the cycle `manifest.json`.
 
 ## Requirements
 
-- Optional: git -- with usable worktrees, plan-runner runs the task DAG on a run-owned
-  integration branch and opens a PR; without worktrees it falls back to per-wave commits;
-  when absent (no git binary or not a repo), all git operations are skipped (see No-git mode)
-- Clean working tree required for DAG mode (a dirty tree gets an explicit stash-or-abort
-  prompt) and recommended in wave mode (you can override, but commits are per-wave)
+- Git, with at least one commit and usable worktrees (see "Git is required"). plan-runner
+  runs on a run-owned integration branch and never touches your active branch.
+- A clean working tree at the start of a run (a dirty tree gets an explicit stash-or-abort
+  prompt).
+- Optional: `gh` for creating the pull request (the title and body are printed otherwise).
 - Optional: Context7 MCP server for current framework docs (auto-detected; skipped if absent)
 
 ## Auto-Setup

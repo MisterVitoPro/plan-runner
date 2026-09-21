@@ -96,7 +96,8 @@ test("SKILL runs per-agent red/green gates, routes bugs, records evidence", () =
   assert.match(f, /Red gate/i, "red gate step");
   assert.match(f, /Green gate/i, "green gate step");
   assert.match(f, /per agent|per-agent/i, "gates applied per agent within a wave");
-  assert.match(f, /invalid red[\s\S]{0,160}(BLOCKED|skip)/i, "invalid red blocks/skips the paired impl");
+  assert.match(f, /A red gate that PASSED \(exit 0 -- the orchestrator detects this directly\) is an \*\*invalid red\*\*/, "an invalid red is detected mechanically");
+  assert.match(f, /`FAIL` on an invalid red/, "an invalid red fails the deterministic check: one repair, then blocked");
   assert.match(f, /No inline retries|no retries|without retr/i, "explicitly no inline retries");
   assert.match(f, /tdd\.tasks|red_run|green_run/i, "writes red/green evidence to the manifest");
 });
@@ -105,7 +106,7 @@ test("Step 2 validation resolves every tests_to_satisfy path (no vacuous green f
   const f = read("skills/run/SKILL.md");
   // every impl tests_to_satisfy path must exist on disk OR be authored by an earlier-wave test-author
   assert.match(f, /every path in `tests_to_satisfy` MUST either \(a\) exist on disk/i, "case (a): path exists on disk");
-  assert.match(f, /`owned_files` of a `test-author` agent in an EARLIER wave/i, "case (b): authored by an earlier-wave test-author");
+  assert.match(f, /`owned_files` of a `test-author` task this impl depends on, directly or transitively/i, "case (b): authored by a test-author task the impl depends on");
   // the failure is a hard validation STOP that names the offender
   assert.match(f, /naming the impl agent and each unresolvable path/i, "STOP names the agent and the unresolvable path");
   // the rationale pins the failure mode being prevented
@@ -119,17 +120,17 @@ test("Step 2 validation keeps test-author owned_files disjoint from the paired i
   // disjointness is required across waves, paired via tests_to_satisfy
   assert.match(f, /`owned_files` MUST be disjoint from the `owned_files` of every paired `impl` agent/i, "test-author/impl owned_files must be disjoint");
   assert.match(f, /impl's `tests_to_satisfy` intersects the test-author's `owned_files`/i, "pairing is derived from tests_to_satisfy");
-  assert.match(f, /Waves being different does NOT excuse the overlap/i, "cross-wave overlap is still a failure");
+  assert.match(f, /A dependency edge between them does NOT excuse the overlap/i, "a dependency edge does not excuse the overlap");
   // the recorded consequence: vacuous red -> paired impl silently skipped
-  assert.match(f, /red gate runs zero tests, exits 0, and the invalid-red rule silently skips the paired impl/i, "records the vacuous-red failure mode");
+  assert.match(f, /red gate runs zero tests, exits 0, and a vacuous red gates the impl that depends on it/i, "records the vacuous-red failure mode");
   // the single legitimate exception is an explicit schema-level opt-in, capped at one shared file
   assert.match(f, /`inline_tests: true`[\s\S]{0,220}exactly ONE file/i, "inline_tests exception shares exactly one file");
   assert.match(f, /naming both agents and each shared path/i, "STOP names both agents and the shared path");
   // the schema carries the opt-in field, back-compat noted
-  const schema = JSON.parse(read("schemas/wave-plan.schema.json"));
-  const agentProps = schema.properties.waves.items.properties.agents.items.properties;
-  assert.equal(agentProps.inline_tests.type, "boolean", "wave-plan schema defines inline_tests as boolean");
-  assert.match(agentProps.inline_tests.description, /pre-1\.18\.0/, "inline_tests description notes back-compat");
+  const schema = JSON.parse(read("schemas/task-graph.schema.json"));
+  const agentProps = schema.$defs.task.properties;
+  assert.equal(agentProps.inline_tests.type, "boolean", "task-graph schema defines inline_tests as boolean");
+  assert.match(agentProps.inline_tests.description, /3\.0\.0/, "inline_tests description notes where it came from");
   // the analyzer role documents when to emit it
   const analyzer = read("agents/plan-analyzer.md");
   assert.match(analyzer, /inline_tests: true/, "analyzer role documents the inline_tests opt-in");
@@ -186,34 +187,14 @@ test("SKILL loads every bundled pipeline role relative to itself", () => {
   assert.match(f, /Codex discovers the skills and does not automatically register `agents\/` files/i, "must explain why portable role loading is required");
 });
 
-test("SKILL gates each wave on the verifier and forbids the orchestrator self-verifying", () => {
+test("SKILL gates each task on its verifier and forbids the orchestrator self-verifying", () => {
   const f = read("skills/run/SKILL.md");
   // teams-aware verifier completion: poll the durable return file, not a status guess
-  assert.match(f, /poll for the verifier's `return_file`/i, "teams backend must poll the verifier's return file");
+  assert.match(f, /poll for the file rather than inferring anything from task status/i, "verdicts are read from the durable return file, never inferred");
   // explicit no-self-verify rule
   assert.match(f, /No-self-verify|MUST NOT perform the verification itself|MUST NOT substitute its own judgment/i, "must forbid the orchestrator from self-verifying");
   // missing verdict routes to UNVERIFIABLE, not a silently-closed wave
   assert.match(f, /UNVERIFIABLE[\s\S]{0,160}(aggregate|fix-plan|re-run)/i, "missing verdict must route through the fix-plan loop");
-});
-
-test("SKILL has a verifier-coverage gate before aggregation", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /Verifier-coverage gate/i, "must define a verifier-coverage gate");
-  // gate lives at the top of Step 5, before the bug count, so both the clean and buggy paths hit it
-  assert.ok(
-    f.indexOf("Verifier-coverage gate") < f.indexOf("Count total bugs across all bug JSONs"),
-    "the coverage gate must run before counting bugs"
-  );
-  assert.match(f, /every.{0,10}wave[\s\S]{0,120}wave-<W>\.json/i, "must assert every wave produced a bug JSON");
-  assert.match(f, /structurally impossible to reach the PR|PR.{0,40}(outstanding|while a verifier)/i, "gate must block opening a PR while a verdict is outstanding");
-});
-
-test("coverage gate treats SKIPPED as intentional, distinct from UNVERIFIABLE", () => {
-  const f = read("skills/run/SKILL.md");
-  // SKIPPED is a present, non-null status -> not backfilled, not a bug
-  assert.match(f, /SKIPPED[\s\S]{0,240}(does NOT backfill|not.{0,20}backfill|not.{0,25}treat it as a bug)/i, "SKIPPED waves are not backfilled as bugs");
-  // in-scope-but-missing verdict still becomes UNVERIFIABLE
-  assert.match(f, /in scope for a semantic verifier[\s\S]{0,160}UNVERIFIABLE|UNVERIFIABLE[\s\S]{0,200}(missing|null)/i, "in-scope missing verdict still becomes UNVERIFIABLE");
 });
 
 test("SKILL selects an execution backend (Claude Agent Teams vs native subagents)", () => {
@@ -256,14 +237,14 @@ test("a CI guard blocks private infrastructure identifiers from reaching tracked
   );
 });
 
-test("release metadata and contract pins are synchronized at 2.2.0", () => {
+test("release metadata and contract pins are synchronized at 3.0.0", () => {
   const claude = JSON.parse(read(".claude-plugin/plugin.json"));
   const codex = JSON.parse(read(".codex-plugin/plugin.json"));
   const npm = JSON.parse(read("package.json"));
-  assert.equal(claude.version, "2.2.0", "contract-test release pin is current");
+  assert.equal(claude.version, "3.0.0", "contract-test release pin is current");
   assert.equal(codex.version, claude.version, "Codex manifest version matches Claude manifest");
   assert.equal(npm.version, claude.version, "package version matches plugin manifests");
-  assert.match(read("CHANGELOG.md"), /^## 2\.2\.0 - \d{4}-\d{2}-\d{2}$/m, "changelog has the current release entry");
+  assert.match(read("CHANGELOG.md"), /^## 3\.0\.0 - \d{4}-\d{2}-\d{2}$/m, "changelog has the current release entry");
   // the marketplace blurb stays ecosystem-length (median ~150 chars across public
   // catalogs; every browsing surface truncates past a few lines) -- per-release
   // feature detail belongs in CHANGELOG/README, never appended here
@@ -273,9 +254,14 @@ test("release metadata and contract pins are synchronized at 2.2.0", () => {
   assert.match(readme, /red.{0,5}green|red→green/i, "README describes the red-green flow");
 });
 
-test("docs and plugin metadata describe the 2.0 task-DAG executor", () => {
+test("docs and plugin metadata describe the DAG-only executor", () => {
   const readme = read("README.md");
-  assert.match(readme, /--execution-mode <dag\|wave>/, "README documents the --execution-mode flag");
+  assert.match(readme, /The task DAG is plan-runner's only executor \(since 3\.0\.0\)/, "README states the DAG is the only executor");
+  assert.match(readme, /## Git is required/, "README replaces no-git mode with the Git requirement");
+  assert.match(readme, /share: auto\s+# auto \(default\)/, "README documents the worktree bootstrap");
+  assert.doesNotMatch(readme, /## No-git mode|falls back to verified file-disjoint waves|--sync-verify` --|last-wave-only/, "README carries no wave-executor documentation");
+  assert.ok(exists("docs/adr/0011-remove-the-wave-executor.md"), "the removal is recorded as an ADR");
+  assert.match(read("AGENTS.md"), /The task DAG is the only executor \(since 3\.0\.0; ADR-0011\)/, "AGENTS.md invariant matches");
   assert.match(readme, /max_integrations_per_phase/, "README documents the DAG phase boundary");
   assert.match(readme, /events\.jsonl/, "README lists the append-only task event log");
   assert.match(readme, /plan-integrator/, "README names the central integrator role");
@@ -350,63 +336,6 @@ test("hooks.json pins the base-agnostic **/plan-runner/ gitignore entry", () => 
   assert.match(description, /\*\*\/plan-runner\//, "hook description also names **/plan-runner/");
 });
 
-test("README documents configurable verification coverage", () => {
-  const readme = read("README.md");
-  assert.match(readme, /--verify/, "README documents the --verify flag");
-  assert.match(readme, /\.plan-runner\.yml/, "README documents the config file");
-  assert.match(readme, /last-wave-only/, "README lists the verification modes");
-});
-
-test("SKILL releases dev agents and wave verifiers after every wave", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /Tear down wave dev agents/i, "must define a dev-agent teardown step");
-  assert.match(f, /Tear down the wave verifier/i, "must tear down the wave verifier too");
-  assert.match(f, /host-native (stop|facility)|host-native facility/i, "subagent teardown uses the host-native facility");
-  assert.match(f, /teammate.{0,80}(agent ID|name@team|bare teammate name)/i, "teams backend tears down by teammate identity");
-  // dev-agent teardown happens regardless of status, and before the next dispatch
-  assert.match(f, /regardless of `?dev_status`?[\s\S]{0,40}(DONE|BLOCKED)/i, "dev agents are torn down regardless of DONE/BLOCKED status");
-  // verifier teardown happens regardless of verdict
-  assert.match(f, /regardless of `?verifier_status`?[\s\S]{0,60}(CLEAN|BUGS_FOUND|UNVERIFIABLE)/i, "verifier is torn down regardless of its verdict");
-  // teardown must happen for every wave, not just at the end of the whole run
-  assert.match(f, /every wave, not only the last one/i, "teardown must run wave by wave, not deferred to the end of the cycle");
-  // the teardown step must precede the next dispatch point (verifier dispatch)
-  assert.ok(
-    f.indexOf("Tear down wave dev agents") < f.indexOf("### 4c. Verify the wave"),
-    "dev-agent teardown must happen before the wave verifier is dispatched"
-  );
-});
-
-test("SKILL guards against rogue dev-agent self-commits", () => {
-  const f = read("skills/run/SKILL.md");
-  // a wave-start SHA is recorded so rogue commits are detectable, gated on git
-  assert.match(f, /wave_start_sha/, "must record a wave-start SHA");
-  assert.match(
-    f,
-    /git_available[\s\S]{0,200}wave_start_sha|wave_start_sha[\s\S]{0,200}git_available/i,
-    "wave-start SHA capture must be gated on git availability"
-  );
-  // a named guard section exists
-  assert.match(f, /Rogue-commit guard/, "must define a rogue-commit guard");
-  // detection: commits since the wave-start SHA scoped to the agent's owned files
-  assert.match(
-    f,
-    /git log[^\n]*wave_start_sha[^\n]*\.\.HEAD/,
-    "guard must check commits since the wave-start SHA"
-  );
-  // a rogue self-commit counts as delivered work -- never a reason to dispatch a retry agent
-  assert.match(
-    f,
-    /rogue[\s\S]{0,400}(do NOT dispatch a retry|counts as delivered)/i,
-    "a rogue self-commit must not trigger a retry agent"
-  );
-  // 4e: a clean tree with rogue commits is NOT "nothing to commit"
-  assert.match(
-    f,
-    /nothing to commit[\s\S]{0,700}rogue|rogue[\s\S]{0,700}nothing to commit/i,
-    "the no-changes branch of the wave commit must consider rogue commits"
-  );
-});
-
 test("plan-dev explicitly forbids git writes", () => {
   const f = read("agents/plan-dev.md");
   assert.match(
@@ -414,17 +343,6 @@ test("plan-dev explicitly forbids git writes", () => {
     /NEVER run `?git (add|commit|push)/i,
     "plan-dev must name the forbidden git commands, not just say 'do not commit'"
   );
-});
-
-test("git is optional: run skill gates all git ops on availability", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /git rev-parse --is-inside-work-tree/, "must detect git via rev-parse --is-inside-work-tree");
-  assert.match(f, /git_available/, "must set a git_available flag");
-  // clean-tree check, per-wave commit, and PR step must each be gated
-  // (allow backticks around `git_available` in the prose)
-  assert.match(f, /git_available.{0,3}is false[\s\S]{0,80}skip this step/i, "clean-tree check skipped when git absent");
-  assert.match(f, /git_available.{0,3}is false[\s\S]{0,120}(skipping commit|git not available)/i, "per-wave commit skipped when git absent");
-  assert.match(f, /git_available.{0,3}is false[\s\S]{0,400}Plan Runner PR/i, "PR step skipped when git absent");
 });
 
 test("git is optional: pr skill guards on git availability", () => {
@@ -439,32 +357,10 @@ test("manifest schema documents git_available", () => {
   assert.equal(schema.properties.git_available.type, "boolean", "git_available is a boolean");
 });
 
-test("run skill syncs code-atlas before the PR step", () => {
-  const f = read("skills/run/SKILL.md");
-  // a dedicated step exists and precedes OPEN PR
-  assert.match(f, /Step 7-bis: SYNC CODE ATLAS/, "must define the code-atlas sync step");
-  assert.ok(
-    f.indexOf("Step 7-bis: SYNC CODE ATLAS") < f.indexOf("Step 8: OPEN PR"),
-    "the sync step must come before the OPEN PR step"
-  );
-  // detection is gated on the code-atlas state file and invokes the incremental update
-  assert.match(f, /\.code-atlas\/state\.json/, "must detect code-atlas via state.json");
-  assert.match(f, /code-atlas:update/, "must invoke the code-atlas:update skill");
-  // gated on git availability like the other git-dependent steps
-  assert.match(f, /git_available.{0,3}is false[\s\S]{0,160}code-atlas sync skipped/i, "sync skipped when git absent");
-  // both PR-bound paths route through the sync step
-  assert.match(f, /Proceed to Step 7-bis/, "clean-run + stop-rerun paths route through the sync step");
-});
-
 test("manifest schema documents code_atlas_sync", () => {
   const schema = JSON.parse(read("schemas/manifest.schema.json"));
   assert.ok(schema.properties.code_atlas_sync, "manifest schema must define code_atlas_sync");
   assert.ok(schema.properties.code_atlas_sync.properties.ran, "code_atlas_sync has a ran flag");
-});
-
-test("README documents the code-atlas sync", () => {
-  const readme = read("README.md");
-  assert.match(readme, /code-atlas:update|Code Atlas sync/i, "README documents the code-atlas sync");
 });
 
 test("manifest schema documents the verification coverage block", () => {
@@ -505,7 +401,7 @@ test("run skill captures and tallies subagent tokens", () => {
   assert.match(f, /[Nn]ever fabricate/, "skill forbids fabricating token counts");
   // captured for each subagent class
   assert.match(f, /analyzer["']?,\s*"phase":\s*"analyze"/, "analyzer tokens are captured");
-  assert.match(f, /"phase":\s*"wave"/, "dev-agent tokens are captured");
+  assert.match(f, /"phase":\s*"task"/, "dev-agent tokens are captured");
   assert.match(f, /verifier["']?,\s*"phase":\s*"verify"/, "verifier tokens are captured");
   assert.match(f, /aggregator["']?,\s*"phase":\s*"aggregate"/, "aggregator tokens are captured");
   // tally fields are finalized and surfaced
@@ -539,7 +435,7 @@ test("run skill prefers harness usage and falls back to the agent self-report", 
   assert.match(f, /self-report[\s\S]{0,240}lower bound|lower bound[\s\S]{0,240}self-report/i, "self-reports are described as a lower bound");
   // fallback fires when the completion result has no figure; null only when both sources are dry
   assert.match(f, /fall back to the `?token_usage`? self-report/i, "capture falls back to the agent's self-report");
-  assert.match(f, /neither source[\s\S]{0,120}(null|unreported)/i, "tokens are null only when both sources are missing");
+  assert.match(f, /no source yields a figure[\s\S]{0,120}(null|unreported)/i, "tokens are null only when every source is missing");
   // honesty invariant extends to self-reports
   assert.match(f, /token_usage: null`? must never be .{0,10}rescued|never.{0,30}rescued.{0,20}with a guess/i, "a null self-report is never replaced with a guess");
 });
@@ -549,13 +445,14 @@ test("return schemas carry an optional token_usage self-report (back-compat)", (
   assert.ok(dev.properties.token_usage, "dev-return schema defines token_usage");
   assert.ok(!dev.required.includes("token_usage"), "dev-return token_usage is optional");
   assert.match(dev.properties.token_usage.description, /1\.11\.0/, "dev-return notes pre-1.11.0 back-compat");
-  const wp = JSON.parse(read("schemas/wave-plan.schema.json"));
-  assert.ok(wp.properties.token_usage, "wave-plan schema defines the analyzer's token_usage");
-  assert.ok(!wp.required.includes("token_usage"), "wave-plan token_usage is optional");
+  const tg = JSON.parse(read("schemas/task-graph.schema.json"));
+  assert.ok(tg.properties.token_usage, "task-graph schema defines the analyzer's token_usage");
+  assert.ok(!tg.required.includes("token_usage"), "task-graph token_usage is optional");
+  assert.ok(!exists("schemas/wave-plan.schema.json"), "the wave-plan schema was removed with the wave executor");
   // manifest entries record where each figure came from
   const manifest = JSON.parse(read("schemas/manifest.schema.json"));
   const byAgent = manifest.properties.token_usage.properties.by_agent.items.properties;
-  assert.deepEqual(byAgent.source.enum, ["harness", "self_report"], "by_agent entries carry a source enum");
+  assert.deepEqual(byAgent.source.enum, ["harness", "self_report", "http_usage"], "by_agent entries carry a source enum, extended with http_usage in 3.0.0 so an endpoint-bound agent's entry validates");
   assert.deepEqual(manifest.$defs.tokenCount.properties.source.enum, ["harness", "self_report", "http_usage"], "tokenCount carries a source enum extended with http_usage for endpoint dispatch (2.2.0)");
   assert.ok(!(manifest.properties.token_usage.properties.by_agent.items.required || []).includes("source"), "source is optional on by_agent entries");
 });
@@ -585,7 +482,7 @@ test("run skill renders a unified end-of-run Run Report", () => {
   assert.match(f, /sums of the \*\*non-null\*\* values/i, "sums skip null entries");
   // honesty lines ride under the stat header
   assert.match(f, /!\s*Tokens are a lower bound/, "partial-token honesty line");
-  assert.match(f, /waves were not semantically verified/, "unverified-waves honesty line");
+  assert.match(f, /tasks are blocked and were not integrated/, "blocked-tasks honesty line");
   // it prints once at the terminal end -- the old per-step Token Report print is gone
   assert.doesNotMatch(f, /full \*\*Token Report\*\* block/, "old per-step Token Report print removed");
 });
@@ -625,9 +522,8 @@ test("read-only pipeline agents declare least-privilege tools", () => {
 test("agent returns are file-backed: durable return_file handoff, mailbox is preview-only", () => {
   const f = read("skills/run/SKILL.md");
   // both dispatch prompts carry a deterministic return_file path under the cycle's returns/ dir
-  assert.match(f, /return_file: <absolute path: \$phase_dir\/returns\/wave-<W>-<agent_id>\.json>/, "dev dispatch prompt names the agent's return_file");
-  assert.match(f, /return_file: <absolute path: \$phase_dir\/returns\/wave-<W>-verifier\.json/, "verifier dispatch prompt names its return_file");
-  assert.match(f, /wave-<W>-agent-<n>-verifier\.json/, "per-agent verifiers get per-agent return files");
+  assert.match(f, /return_file: <absolute path: \$cycle_dir\/returns\/<task_id>-a<attempt>\.json>/, "dev dispatch prompt names the agent's return_file");
+  assert.match(f, /return_file: <absolute path: \$cycle_dir\/returns\/<task_id>-a<n>-verifier\.json>/, "verifier dispatch prompt names the verifier's return_file");
   // both prompts instruct the write as the agent's LAST action
   assert.match(f, /FILE-BACKED RETURN: as your LAST action/, "dispatch prompts mandate the final-action file write");
   // the orchestrator reads the file as source of truth; the message is never load-bearing
@@ -637,11 +533,11 @@ test("agent returns are file-backed: durable return_file handoff, mailbox is pre
   assert.match(f, /races the (teammate|verifier)'s idle teardown/, "records the resend/teardown race");
   // capture order: file first, message fallback, synthetic BLOCKED/UNVERIFIABLE only when both fail
   assert.match(f, /`return_file` and parse the JSON; when the file is missing or unparseable, fall back/, "dev capture reads the file first");
-  assert.match(f, /its `return_file` first, falling back to its returned message/, "verifier capture reads the file first");
+  assert.match(f, /When the `return_file` appears, parse it \(falling back to the verifier's returned message/, "the verdict is read from the return file first");
   // the stuck-teammate fallback checks the return file before declaring BLOCKED
-  assert.match(f, /check the teammate's `return_file` first/, "wave-barrier fallback consults the return file before BLOCKED");
+  assert.match(f, /check its `return_file` first/, "a stuck agent's return file is consulted before declaring it BLOCKED");
   // teardown is explicitly safe because returns survive it
-  assert.match(f, /return is file-backed in `\$phase_dir\/returns\/`, which survives the stop/, "teardown cannot lose a file-backed return");
+  assert.match(f, /return is file-backed in `\$cycle_dir\/returns\/`, which survives the stop/, "teardown cannot lose a file-backed return");
   // the verifier role honors the handoff
   const verifier = read("agents/plan-verifier.md");
   assert.match(verifier, /File-backed return/i, "verifier role defines the file-backed return rule");
@@ -664,7 +560,8 @@ test("SKILL loads .plan-runner.yml once, and absence is only ever a not-found re
   assert.match(f, /### 1a-minus-bis\. Load `\.plan-runner\.yml`/, "has a dedicated config-load pre-flight step");
   const loadIdx = f.indexOf("1a-minus-bis. Load");
   for (const consumer of [
-    "### 1d-quater. Resolve verification mode",
+    "### 1c-ter. Worktree bootstrap",
+    "### 1d-bis. Resolve gate settings, test command + green baseline",
     "### 1d-quinquies. Resolve phasing config",
     "### 1d-sexies. Resolve project-agent dispatch",
     "### 1d-septies.",
@@ -692,13 +589,11 @@ test("SKILL loads .plan-runner.yml once, and absence is only ever a not-found re
 
   // every consumer reads the loaded text rather than re-reading the file
   for (const key of [
-    /use the `verification\.mode` value from `config_text`/,
-    /the `verification\.pipelined` value from `config_text`/,
+    /extract each key directly from `config_text` \(Step 1a-minus-bis\)/,
     /Extract each key directly from `config_text` \(Step 1a-minus-bis\)/,
     /use the `agents\.project` value from `config_text`/,
     /use the `models\.enabled` value from `config_text`/,
     /extract the `models:` block\*\* from `config_text`/,
-    /the `execution\.mode` value from `config_text`/,
   ]) {
     assert.match(f, key, `consumer reads from config_text: ${key}`);
   }
@@ -711,19 +606,6 @@ test("SKILL loads .plan-runner.yml once, and absence is only ever a not-found re
   const readme = read("README.md");
   assert.match(readme, /## Configuration file/, "README documents the single config file");
   assert.match(readme, /Config: no \.plan-runner\.yml at repo root -- using defaults\./, "README shows the absent line so a misread is recognizable");
-});
-
-test("SKILL resolves a configurable verification mode (file + flag + default)", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /per-agent/, "documents per-agent mode");
-  assert.match(f, /per-wave/, "documents per-wave mode");
-  assert.match(f, /last-wave-only/, "documents last-wave-only mode");
-  assert.match(f, /--verify/, "documents the --verify flag");
-  assert.match(f, /\.plan-runner\.yml/, "reads the .plan-runner.yml config file");
-  // precedence: flag > file > default
-  assert.match(f, /--verify[\s\S]{0,120}\.plan-runner\.yml[\s\S]{0,120}(default|per-wave)/i, "precedence flag > file > default");
-  assert.match(f, /default.{0,20}per-wave|per-wave.{0,20}default/i, "default is per-wave");
-  assert.match(f, /Resolve verification mode/i, "has a dedicated resolve-mode pre-flight step");
 });
 
 test("docs cover the Agent Teams backend", () => {
@@ -749,36 +631,6 @@ test("pr skill is agent-only: hidden from the user slash menu", () => {
   assert.doesNotMatch(run, /^user-invocable:/m, "run skill stays user-invocable");
 });
 
-test("SKILL verifier dispatch honors verify_mode (per-agent | per-wave | last-wave-only)", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /verify_mode/, "Step 4c branches on verify_mode");
-  assert.match(f, /one verifier per dev agent/i, "per-agent = one verifier per dev agent");
-  assert.match(f, /last-wave-only[\s\S]{0,260}(final wave|last wave)/i, "last-wave-only verifies only the final wave");
-  assert.match(f, /"verifier_status":\s*"SKIPPED"/, "unverified waves are written SKIPPED");
-  // BLOCKED relayed by the orchestrator (not a verifier) on skipped waves, from declared status
-  assert.match(f, /BLOCKED[\s\S]{0,240}(declared|dev-reported|dev_status)[\s\S]{0,120}(P0|synthesize)/i, "BLOCKED relayed from dev status on skipped waves");
-  // per-agent verifier token label
-  assert.match(f, /wave-<W>-agent-<n>-verifier/, "per-agent verifiers get per-agent token labels");
-});
-
-test("SKILL keeps 'clean' honest about verification depth", () => {
-  const f = read("skills/run/SKILL.md");
-  // the zero-bug summary must qualify itself when waves were skipped
-  assert.match(f, /waves_skipped[\s\S]{0,240}(not.{0,20}semantically verified|not.{0,20}verified)/i, "clean summary qualifies when waves were skipped");
-  // the re-run handoff carries the effective mode forward
-  assert.match(f, /--verify <verify_mode>|carry.{0,40}verify_mode[\s\S]{0,40}re-run/i, "re-run handoff carries the effective verify_mode");
-  // convergence hint acknowledges differing modes
-  assert.match(f, /different[\s\S]{0,40}verify_mode|verify_mode[\s\S]{0,60}(shallower|convergence)/i, "convergence hint notes differing verify_mode");
-});
-
-test("pr skill drafts + banners when waves were left unverified", () => {
-  const f = read("skills/pr/SKILL.md");
-  assert.match(f, /verification/, "pr skill reads the verification block");
-  assert.match(f, /waves_skipped/, "pr skill checks waves_skipped");
-  assert.match(f, /draft[\s\S]{0,160}waves_skipped|waves_skipped[\s\S]{0,160}draft/i, "skipped waves force a draft PR");
-  assert.match(f, /not semantically verified|not verified/i, "PR body banners the unverified waves");
-});
-
 test("phasing config: .plan-runner.yml block keys and defaults are pinned", () => {
   const f = read("skills/run/SKILL.md");
   // CLI flags
@@ -787,22 +639,12 @@ test("phasing config: .plan-runner.yml block keys and defaults are pinned", () =
   assert.match(f, /--no-phasing/, "documents the --no-phasing kill-switch flag");
   // yml block and its five keys with their documented defaults
   assert.match(f, /phasing:\s*\n\s*enabled:\s*true\s*# default true/, "yml block: enabled default true");
-  assert.match(f, /max_waves_per_phase:\s*4\s*# default 4/, "yml block: max_waves_per_phase default 4");
+  assert.match(f, /max_integrations_per_phase: 12\s*# default 12/, "yml block: max_waves_per_phase default 4");
   assert.match(f, /mode:\s*auto\s*# auto \(default\) \| relay \| stop/, "yml block: mode default auto, enum relay|stop");
   assert.match(f, /auto_stop_phases:\s*3\s*#/, "yml block: auto_stop_phases default 3");
   assert.match(f, /relay_max_minutes:\s*90\s*#/, "yml block: relay_max_minutes default 90");
   // precedence
   assert.match(f, /flag > yml > default/, "documents flag > yml > default precedence");
-});
-
-test("phasing trigger: sub-threshold plans stay unphased with no run-state", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(
-    f,
-    /phasing_enabled`? is (true AND|false).{0,80}W <= max_waves_per_phase|W <= max_waves_per_phase[\s\S]{0,200}phasing does not activate/i,
-    "sub-threshold plans (W <= max_waves_per_phase) do not activate phasing"
-  );
-  assert.match(f, /byte-for-byte today's pipeline/i, "sub-threshold and --no-phasing runs stay byte-for-byte today's pipeline");
 });
 
 test("adaptive mode selection: stop above auto_stop_phases, relay at or below", () => {
@@ -854,20 +696,6 @@ test("resume: pre-flight auto-detect offers resume and marks declined runs aband
   assert.match(f, /abandoned run-states are never resumed/i, "an explicit --resume onto an abandoned state still refuses");
 });
 
-test("resume: dirty-tree prompt offers stash or keep before re-dispatching a wave", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /### R\.6\. Interrupted-wave re-dispatch \(dirty tree, ask once\)/, "defines the interrupted-wave re-dispatch step");
-  assert.match(f, /Dirty-tree prompt \(git only, ask once\)/, "names the dirty-tree prompt");
-  assert.match(f, /\[s\] stash first \(git stash -u\), then re-run the wave against a clean tree/, "stash option");
-  assert.match(f, /\[k\] keep the changes and let this wave's agents overwrite files as needed/, "keep option");
-  assert.match(f, /never silently discard uncommitted work/i, "the prompt exists precisely to avoid silent data loss");
-  assert.match(
-    f,
-    /In no-git mode \(`?git_available`? false\), skip this prompt entirely/i,
-    "no-git mode skips the prompt and still drives resume from run-state.json alone"
-  );
-});
-
 test("resume: plan-drift guard requires explicit confirmation on a hash mismatch", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /### R\.4\. Plan-drift guard/, "defines the plan-drift guard step");
@@ -880,14 +708,6 @@ test("resume: corrupt or missing run-state reports failure and offers a fresh ru
   assert.match(f, /### R\.2\. Load and validate the run-state \(corrupt or missing\)/, "defines the corrupt/missing run-state step");
   assert.match(f, /Cannot resume: run-state is missing or unreadable\./, "prints the failure message");
   assert.match(f, /never infer state/i, "never infers state from a corrupt or missing run-state");
-});
-
-test("cross-phase verifier-coverage gate stays upstream of the PR step across all phases", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /### 5\.0\. Verifier-coverage gate \(runs before counting, on every path\)/, "defines the coverage gate step");
-  assert.match(f, /every.{0,10}wave `?1\.\.W`? of every phase produced a verdict/i, "gate sweeps every wave of every phase");
-  assert.match(f, /structurally impossible to reach the PR step/i, "gate makes an outstanding verdict block the PR step");
-  assert.match(f, /upstream of the PR step on every path across phases/i, "gate stays upstream across every phase path");
 });
 
 test("Return budget sections are pinned in all five agent roles", () => {
@@ -914,13 +734,14 @@ test("run-state schema exists, parses, and documents the phase-checkpoint lifecy
     "plan_content_hash",
     "invocation_flags",
     "backend",
-    "verify_mode",
     "tdd_enabled",
-    "phases",
     "overall_status",
     "updated_at",
   ]) {
     assert.ok(schema.required.includes(key), `run-state schema requires ${key}`);
+  }
+  for (const key of ["verify_mode", "phases"]) {
+    assert.ok(!schema.required.includes(key), `run-state schema no longer requires the wave-era ${key}`);
   }
   assert.deepEqual(
     schema.properties.overall_status.enum,
@@ -939,39 +760,6 @@ test("run-state schema exists, parses, and documents the phase-checkpoint lifecy
   assert.match(validator, /run-state\.schema\.json.{0,10}run-state\.valid\.json.{0,10}run-state\.invalid\.json/, "validate_schemas.py wires up the run-state case");
 });
 
-test("phase boundaries persist their scoped token tally so the cross-phase roll-up is complete", () => {
-  const f = read("skills/run/SKILL.md");
-  // relay phase-runner exit (Step 3-bis.0) persists its own scoped token_usage to the phase manifest
-  assert.match(
-    f,
-    /finalize and persist this phase's own scoped token tally before returning/i,
-    "relay phase-runner finalizes and persists its scoped token tally before returning"
-  );
-  // stop-mode boundary (Step 3-bis.3) does the same at every boundary
-  assert.match(
-    f,
-    /at every stop boundary \(terminal and non-terminal alike\)/i,
-    "stop-mode boundary persists its scoped token tally at every boundary"
-  );
-  // both use the same computation as Step 5.1's tally finalization and write to the phase manifest
-  assert.match(
-    f,
-    /same computation as Step 5\.1's tally finalization[\s\S]{0,200}\$phase_dir\/manifest\.json/i,
-    "phase-manifest token persistence reuses Step 5.1's finalization computation"
-  );
-  // Step 5.2 folds the cycle-level analyzer + aggregator into the cross-phase union
-  assert.match(
-    f,
-    /explicitly fold in the analyzer's and aggregator's cycle-level entries/i,
-    "Step 5.2 folds the cycle-level analyzer + aggregator into the cross-phase token union"
-  );
-  assert.match(
-    f,
-    /[Dd]eduplicate the combined set by `?agent`? label/,
-    "the fold-in deduplicates by agent label so nothing is double-counted"
-  );
-});
-
 test("relay phase-runner derives cycle_dir from the run-state path", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(
@@ -981,93 +769,12 @@ test("relay phase-runner derives cycle_dir from the run-state path", () => {
   );
 });
 
-test("resume defers the TDD green-baseline capture until after the dirty-tree decision", () => {
-  const f = read("skills/run/SKILL.md");
-  // R.3 no longer captures the baseline; it defers to R.6
-  assert.match(f, /Defer the green-baseline capture to R\.6/i, "R.3 defers the green-baseline capture to R.6");
-  // R.6 captures it after the stash/keep decision resolves
-  assert.match(f, /\*\*Green baseline \(deferred from R\.3/, "R.6 captures the deferred green baseline");
-  assert.match(
-    f,
-    /after the stash\/keep decision resolves[\s\S]{0,160}(pre-stash|tainted)/i,
-    "baseline is captured after R.6 resolves so it reflects the tree the wave re-runs over"
-  );
-});
-
-test("waves_total is phase-scoped per manifest and cannot overcount by phase_count", () => {
-  const f = read("skills/run/SKILL.md");
-  // Step 4f writes a phase-scoped waves_total
-  assert.match(
-    f,
-    /`?verification\.waves_total`? is set to \*\*this phase's own wave count\*\*/,
-    "Step 4f sets a phase-scoped waves_total"
-  );
-  // both Step 4f and Step 5.2 rule out phase_count * W
-  const overcountMatches = f.match(/phase_count \* W/g) || [];
-  assert.ok(overcountMatches.length >= 2, "both Step 4f and Step 5.2 explicitly rule out phase_count * W");
-  // Step 5.2 resolves waves_total to the global W from the cycle-root wave plan
-  assert.match(
-    f,
-    /`?verification\.waves_total`? is the global wave count `?W`?, taken directly from the cycle-root `?wave-plan\.json`?/,
-    "Step 5.2 resolves waves_total to the global W"
-  );
-});
-
-test("stale (Step 7) cross-phase summation references were corrected to (Step 5.2)", () => {
-  const f = read("skills/run/SKILL.md");
-  // the two summation cross-refs now name Step 5.2
-  assert.match(f, /sums across the per-phase manifests \(Step 5\.2\)/, "relay-driver summary ref points at Step 5.2");
-  assert.match(f, /terminal-phase reporting \(Step 5\.2\) sums across the per-phase manifests/, "Step 2-bis ref points at Step 5.2");
-  // no summation cross-ref still points at Step 7
-  assert.doesNotMatch(f, /per-phase manifests \(Step 7\)|\(Step 7\) sums across the per-phase manifests/, "no stale (Step 7) summation ref remains");
-});
-
-test("verification is pipelined: commit precedes verifier dispatch, verdicts drain before aggregation", () => {
-  const f = read("skills/run/SKILL.md");
-  // the commit step now precedes the verification step in the wave flow
-  assert.ok(
-    f.indexOf("### 4b. Commit the wave") < f.indexOf("### 4c. Verify the wave"),
-    "wave commit must come before verifier dispatch"
-  );
-  // pipelined verifiers read a snapshot pinned to the wave commit, never the live tree
-  assert.match(f, /git worktree add --detach[^\n]*<commit_sha>/, "snapshot worktree is pinned to the wave commit SHA");
-  assert.match(f, /snapshot_root/, "verifier prompt carries the snapshot root");
-  // dispatch does not block the next wave
-  assert.match(f, /\*\*Do NOT wait \(pipelined waves\)\.\*\*/, "pipelined dispatch does not wait for the verdict");
-  assert.match(f, /At most one wave's verification is ever in flight/i, "in-flight verification is bounded to one wave");
-  // every verdict drains before aggregation / phase boundaries
-  assert.match(f, /### 4g\. Drain outstanding verdicts/, "defines the end-of-range drain");
-  assert.ok(
-    f.indexOf("### 4g. Drain outstanding verdicts") < f.indexOf("## Step 5: AGGREGATE"),
-    "the drain precedes aggregation"
-  );
-  // kill-switch: flag + yml key, and no-git always synchronous
-  assert.match(f, /--sync-verify/, "documents the --sync-verify kill-switch");
-  assert.match(f, /verification\.pipelined/, "documents the verification.pipelined yml key");
-  assert.match(f, /no-git run always verifies synchronously/i, "no-git mode falls back to synchronous verification");
-  // README documents it
-  const readme = read("README.md");
-  assert.match(readme, /--sync-verify/, "README documents --sync-verify");
-  assert.match(readme, /pipelined/i, "README describes pipelined verification");
-});
-
-test("TDD gates run the full suite once per wave, targeted tests per agent", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /Shared full-suite run \(once per wave, not per agent\)/, "one full-suite run per wave");
-  assert.match(f, /WAVE SUITE REGRESSIONS/, "the shared regression block is labeled");
-  assert.match(f, /only standalone agents runs no suite/i, "standalone-only waves skip the suite");
-  const verifier = read("agents/plan-verifier.md");
-  assert.match(verifier, /WAVE SUITE REGRESSIONS/, "verifier understands the shared regression block");
-  assert.match(verifier, /snapshot_root/, "verifier resolves paths under the snapshot root");
-  assert.match(verifier, /repo-relative/, "verifier reports repo-relative paths from the snapshot");
-});
-
 test("resume scan keeps only active run-states (no dead 'interrupted' filter)", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(
     f,
-    /Keep those that parse AND whose `?overall_status`? is `?active`? AND that have at least one phase/,
-    "R.1 keeps run-states whose overall_status is active"
+    /Keep those that parse AND whose `?overall_status`? is `?active`? AND that carry a `dag` member with at least one task that is not terminal/,
+    "R.1 keeps run-states whose overall_status is active and whose graph is unfinished"
   );
   assert.doesNotMatch(
     f,
@@ -1076,15 +783,11 @@ test("resume scan keeps only active run-states (no dead 'interrupted' filter)", 
   );
 });
 
-test("late-verdict reconciliation rule: an expired wait never closes a wave to a later verdict", () => {
+test("late-verdict reconciliation rule: an expired wait never closes a task to a later verdict", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(f, /\*\*Late-verdict reconciliation rule/, "must define the Late-verdict reconciliation rule");
   // an expired bounded wait does not close the wave to a later verdict
-  assert.match(
-    f,
-    /does NOT close that wave to a later verdict/i,
-    "recording UNVERIFIABLE or dispatching a replacement must not close the wave to a later verdict"
-  );
+  assert.match(f, /does NOT close that task to a later verdict/i, "recording UNVERIFIABLE or dispatching a replacement must not close the task to a later verdict");
   // late verdicts are reconciled, not discarded
   assert.match(
     f,
@@ -1100,23 +803,15 @@ test("late-verdict reconciliation rule: an expired wait never closes a wave to a
     "a later or replacement CLEAN must never erase an earlier BUGS_FOUND"
   );
   // both 4g drain and the Step 5.0 coverage gate cross-reference this rule
-  assert.match(
-    f,
-    /apply the late-verdict reconciliation rule \(4c\)/i,
-    "the 4g drain cross-references the late-verdict reconciliation rule"
-  );
-  assert.match(
-    f,
-    /it is a late verdict and MUST be reconciled per the late-verdict reconciliation rule \(4c\)/i,
-    "the Step 5.0 coverage gate cross-references the late-verdict reconciliation rule"
-  );
+  assert.match(f, /A late verdict can never un-integrate a task/, "a late P0 flows to the fix-plan; it never rewrites the branch");
+  assert.match(f, /it is a late verdict and MUST be reconciled per the late-verdict reconciliation rule \(4d\)/i, "the coverage gate defers to the reconciliation rule");
 });
 
 test("pr skill Step 5 diffs against the fetched remote base, not a stale local ref", () => {
   const f = read("skills/pr/SKILL.md");
   assert.match(f, /git fetch origin "<base>"/, "pr skill must refresh the base branch before computing the branch diff");
   assert.match(f, /diff_base = "origin\/<base>"/, "pr skill must diff against origin/<base> when the fetch succeeds");
-  assert.match(f, /git diff --numstat "<diff_base>\.\.\.HEAD"/, "numstat must use the resolved diff_base");
+  assert.match(f, /git diff --numstat "<diff_base>\.\.\.refs\/heads\/<branch>"/, "numstat diffs the run-owned branch by name against the resolved diff_base, never HEAD");
   assert.match(f, /could not fetch origin\/<base>[\s\S]{0,80}may be stale/i, "fallback to the local ref must be announced as possibly stale");
   assert.match(f, /stale-base drift/i, "prose must name the failure mode the fetch prevents");
 });
@@ -1156,7 +851,7 @@ test("plan-analyzer: owned_files provenance, declared dependency order, and stan
   // a plan-declared dependency graph is the ordering source of truth, not reordered for a TDD shape
   assert.match(
     f,
-    /Wave ordering matches any dependency graph the plan declares explicitly \(e\.g\. "Blocked by:" lines\); no task was reordered to fit a preferred shape against a declared dependency/i,
+    /Task ordering matches any dependency graph the plan declares explicitly \(e\.g\. "Blocked by:" lines\); no task was reordered to fit a preferred shape against a declared dependency/i,
     "a declared dependency graph (e.g. Blocked by: lines) is the ordering source of truth and is not reordered for a preferred (TDD) shape"
   );
   // non-runnable prose/docs/config tasks get role standalone / testable false, not a forced split
@@ -1231,7 +926,7 @@ test("SKILL pins the project-agent dispatch overlay: selection, guards, preceden
   // model-precedence sentence
   assert.match(
     f,
-    /a serving project agent's `model:` frontmatter wins; when it declares none, the task's wave-plan `recommended_model` applies/,
+    /a serving project agent's `model:` frontmatter wins; when it declares none, the task's `recommended_model` applies/,
     "model precedence: agent frontmatter wins, else recommended_model"
   );
   // contract-overrides-agent-prose sentence
@@ -1254,7 +949,7 @@ test("SKILL pins the project-agent dispatch overlay: selection, guards, preceden
   );
   assert.match(
     f,
-    /add one `return_contract_violation` bug to this wave's bug JSON/,
+    /add one `return_contract_violation` bug to this task's bug JSON/,
     "a second validation failure adds a return_contract_violation bug"
   );
   assert.match(
@@ -1280,18 +975,6 @@ test("agents/plan-dev.md Dev Return Contract section holds the shared return ske
   for (const status of ["DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"]) {
     assert.match(section, new RegExp(status), `Dev Return Contract documents status value ${status}`);
   }
-});
-
-test("DAG executor remains dependency-ready with a safe legacy-wave fallback", () => {
-  const f = read("skills/run/SKILL.md");
-  assert.match(f, /--execution-mode <dag\|wave>/, "supports an explicit executor mode");
-  assert.match(f, /`dag` by default/, "DAG is the default executor");
-  assert.match(f, /explicit `wave` mode is the rollback mode/i, "wave remains an explicit rollback");
-  assert.match(f, /Git is unavailable or this probe fails[\s\S]{0,260}falling back to the legacy wave executor/i, "no-Git/worktree runs fall back without task dispatch");
-  assert.match(f, /Never attempt task-worktree dispatch in this fallback path/, "fallback never approximates task worktrees");
-  assert.match(f, /without waiting for unrelated active or ready work/i, "ready children do not wait for unrelated work");
-  assert.match(f, /six active dev tasks total/i, "DAG preserves the six-task ceiling");
-  assert.match(f, /Fallback waves remain valid legacy artifacts/i, "wave evidence remains durable for rollback");
 });
 
 test("DAG preflight, state, checkpoints, and recovery require durable evidence", () => {
@@ -1449,7 +1132,7 @@ test("SKILL resolves the model-policy precedence chain: frontmatter > per-role >
   // pre-existing dev-dispatch precedence pin (tests/contract.test.js:1148) must survive untouched
   assert.match(
     f,
-    /a serving project agent's `model:` frontmatter wins; when it declares none, the task's wave-plan `recommended_model` applies/,
+    /a serving project agent's `model:` frontmatter wins; when it declares none, the task's `recommended_model` applies/,
     "existing dev-dispatch precedence sentence is preserved"
   );
   const chain = f.slice(f.indexOf("**Build the resolved model map.**"), f.indexOf("**Endpoint preflight**"));
@@ -1584,64 +1267,6 @@ test("SKILL names the full consent vocabulary and the gate-never-opened omission
   );
 });
 
-test("SKILL names the served_model field, by name, at every analyzer probe call site", () => {
-  const f = read("skills/run/SKILL.md");
-  const dagSection = f.slice(f.indexOf("### DAG.2 Analyze and validate the task graph"), f.indexOf("### DAG.3"));
-  assert.match(
-    dagSection,
-    /compare the model named in its return JSON's top-level `served_model` field against the configured model, and open the availability gate before dispatching any dev task if they differ/,
-    "DAG.2 names served_model, not just 'the model it reports'"
-  );
-  assert.match(
-    dagSection,
-    /A `null` `served_model` means the comparison is not possible -- it is NOT evidence of a mismatch and MUST NOT by itself open the gate/,
-    "DAG.2 states the null case explicitly and forbids treating it as a mismatch"
-  );
-
-  const septiesSection = f.slice(
-    f.indexOf("**Analyzer probe (first-dispatch detection).**"),
-    f.indexOf("**Print the resolved map once**")
-  );
-  assert.match(
-    septiesSection,
-    /top-level `served_model` field/,
-    "1d-septies' canonical analyzer-probe definition names served_model"
-  );
-  assert.match(
-    septiesSection,
-    /`served_model` may be `null` when the analyzer had no reliable way to determine which model served it; a `null` value means the comparison is not possible, is NOT evidence of a mismatch, and MUST NOT by itself open the availability gate/,
-    "1d-septies states the null case explicitly and forbids treating it as a mismatch"
-  );
-
-  const step2Section = f.slice(f.indexOf("## Step 2: ANALYZE PLAN"), f.indexOf("## Step 2-bis: SLICE INTO PHASES"));
-  assert.match(
-    step2Section,
-    /compare the model named in its return JSON's top-level `served_model` field against the model configured for the analyzer role, and open the availability gate before dispatching any dev agent if they differ/,
-    "Step 2 names served_model, not just 'the model it reports'"
-  );
-  assert.match(
-    step2Section,
-    /A `null` `served_model` means the comparison is not possible -- it is NOT evidence of a mismatch and MUST NOT by itself open the gate/,
-    "Step 2 states the null case explicitly and forbids treating it as a mismatch"
-  );
-});
-
-test("SKILL Step 2 (legacy wave pipeline) resolves the analyzer model through Step 1d-septies and runs its probe", () => {
-  const f = read("skills/run/SKILL.md");
-  const section = f.slice(f.indexOf("## Step 2: ANALYZE PLAN"), f.indexOf("## Step 2-bis: SLICE INTO PHASES"));
-  assert.ok(section.length > 0, "Step 2 section is present");
-  assert.match(
-    section,
-    /Use the model resolved for the `analyzer` role in Step 1d-septies -- which layers on top of, and preserves as its built-in default, the `analyzer_model` from step 1c-bis/,
-    "Step 2's analyzer dispatch resolves through Step 1d-septies, keeping step 1c-bis as the no-config default"
-  );
-  assert.match(
-    section,
-    /run Step 1d-septies' analyzer probe: compare the model named in its return JSON's top-level `served_model` field against the model configured for the analyzer role, and open the availability gate before dispatching any dev agent if they differ/,
-    "Step 2 runs the same served-vs-configured analyzer probe as DAG.2 before any dev dispatch"
-  );
-});
-
 test("SKILL makes an endpoint-resolved model non-degradable", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(
@@ -1674,7 +1299,7 @@ test("SKILL persists and rehydrates model_policy across resume and phase relay",
   const f = read("skills/run/SKILL.md");
   assert.match(
     f,
-    /the resolved map, its provenance, the endpoint health, the consent answer, and every substitution persist as `model_policy` in `run-state\.json`/,
+    /The resolved map, its provenance, the endpoint health, the consent answer, and every substitution persist as `model_policy` in `run-state\.json`/,
     "model_policy is the persisted checkpoint shape"
   );
   assert.match(
@@ -1685,25 +1310,20 @@ test("SKILL persists and rehydrates model_policy across resume and phase relay",
   // relay phase-runner entry (Step 3-bis.0) rehydrates model_policy
   assert.match(
     f,
-    /Load `phase_dir`, `verify_mode`, `tdd_enabled`, `backend`, `model_policy`, and phase `phase_runner_id`'s global wave range from it/,
-    "phase relay entry loads model_policy from the run-state"
+    /Load `backend`, `tdd_enabled`, `model_policy`, and the `dag` object from the run-state, and rehydrate `model_policy` \(Step 1d-septies\) rather than re-resolving the `models:` configuration or re-opening the availability gate/,
+    "a relay phase runner rehydrates model_policy from the run-state"
   );
   // legacy resume (R.3) rehydrates model_policy alongside backend/verify_mode/tdd_enabled/phase_mode
   assert.match(
     f,
-    /`backend`, `verify_mode`, `tdd_enabled`, `phase_mode`, and `model_policy` = the values recorded in the run-state/,
+    /`backend`, `tdd_enabled`, `phase_mode`, and `model_policy` = the values recorded in the run-state/,
     "R.3 restores model_policy from the run-state rather than re-detecting it"
   );
   // DAG resume entry (DAG.5) rehydrates model_policy
   assert.match(
     f,
-    /When the loaded state carries `model_policy`, rehydrate it \(Step 1d-septies\) rather than re-resolving the `models:` configuration or re-opening the availability gate/,
-    "DAG.5 resume rehydrates model_policy"
-  );
-  assert.match(
-    f,
-    /An unphased run \(no run-state file\) keeps the policy session-local -- a single session cannot lose it, so the once-per-run rule still holds/,
-    "unphased runs keep the once-per-run guarantee session-locally"
+    /`model_policy` rehydrates \(Step 1d-septies\) rather than re-resolving the `models:` configuration or re-opening the availability gate/,
+    "a resumed run rehydrates model_policy"
   );
 });
 
@@ -1729,7 +1349,7 @@ test("model policy leaves the honesty invariants unweakened", () => {
   const f = read("skills/run/SKILL.md");
   assert.match(
     f,
-    /the verifier-coverage gate stays upstream of the PR step, and a model substitution never closes a wave whose verdict is outstanding/,
+    /the verifier-coverage gate stays upstream of the PR step, and a model substitution never integrates or closes a task whose verdict is outstanding/,
     "verifier-coverage gate stays upstream of the PR step under this feature"
   );
   assert.match(
@@ -1763,8 +1383,8 @@ test("dev/verifier/aggregator dispatch sites route through the model-policy reso
   );
   assert.match(
     f,
-    /the model-policy precedence \(Step 1d-septies, which layers on top of and preserves the existing recommended-model precedence\)/,
-    "DAG dev-task dispatch also routes through the model-policy step"
+    /dispatch the `plan-integrator` role \(complete role definition by absolute path per \*\*Portable role loading\*\*; model per Step 1d-septies, role `integrator`\)/,
+    "integrator dispatch also routes through the model-policy step"
   );
 });
 
@@ -1773,17 +1393,17 @@ test("PR body surfaces model substitutions alongside bug and verification counts
   assert.match(f, /## Model substitutions/, "PR body has a Model substitutions section");
   assert.match(
     f,
-    /any agent entry carries a non-null `model_substituted`.{0,80}insert this section here; omit entirely otherwise/s,
+    /any task entry carries a non-null `model_substituted`.{0,80}insert this section here; omit entirely otherwise/s,
     "the section is present only when a substitution occurred"
   );
   assert.match(
     f,
-    /one\s+bullet\s+per\s+substituted\s+agent\s+or\s+task,\s+in\s+manifest\s+order.{0,120}<model_substituted\.configured>\s*->\s*<model_substituted\.dispatched>\s*\(<model_substituted\.reason>\)/s,
+    /one\s+bullet\s+per\s+substituted\s+task,\s+in\s+manifest\s+order.{0,120}<model_substituted\.configured>\s*->\s*<model_substituted\.dispatched>\s*\(<model_substituted\.reason>\)/s,
     "each bullet names the configured and dispatched model plus the reason"
   );
   assert.match(
     f,
-    /Omit the whole section -- heading included -- when\s*no entry in any wave or task carries a non-null `model_substituted`/,
+    /Omit the whole section -- heading included -- when\s*no task entry carries a non-null `model_substituted`/,
     "the whole section is omitted, heading included, when nothing substituted"
   );
   assert.match(
@@ -1802,7 +1422,7 @@ test("SKILL documents the models.endpoint config surface: roles list and request
   );
   assert.match(
     f,
-    /`models\.endpoint\.request` -- an optional passthrough object \(`timeout_seconds`, `max_tokens`, `body`\) that Step 4a-quater merges over the HTTP dispatch driver's own defaults \(a timeout below the ~300s gateway limit, and `chat_template_kwargs: \{enable_thinking: false\}`\) key by key, so a passthrough key overrides its corresponding default without discarding the rest\./,
+    /`models\.endpoint\.request` -- an optional passthrough object \(`timeout_seconds`, `max_tokens`, `body`\) that Step 4a's HTTP endpoint dispatch merges over the HTTP dispatch driver's own defaults \(a timeout below the ~300s gateway limit, and `chat_template_kwargs: \{enable_thinking: false\}`\) key by key, so a passthrough key overrides its corresponding default without discarding the rest\./,
     "models.endpoint.request merges key by key over the driver's own defaults"
   );
 });
@@ -1916,14 +1536,14 @@ test("SKILL records dispatch_mechanism per agent, matching the manifest schema e
   );
   assert.match(
     f,
-    /`dispatch_mechanism` is `"endpoint"` for an agent dispatched by the HTTP endpoint dispatch step above, `"host_subagent"` for every subagent\/teammate dispatch \(bundled or project alike\) -- also copied from the wave-state map, never re-derived\./,
-    "dispatch_mechanism provenance is copied from the wave-state map, never re-derived"
+    /`dispatch_mechanism` is `"endpoint"` for an agent dispatched by the HTTP endpoint dispatch step \(4a\), `"host_subagent"` for every subagent\/teammate dispatch \(bundled or project alike\) -- both copied from the task-state map, never re-derived\./,
+    "dispatch_mechanism provenance is copied from the task-state map, never re-derived"
   );
   assert.doesNotMatch(f, /dispatch_mechanism["']?:\s*"host"/, "dispatch_mechanism must never use the bare value 'host'");
 
   const manifest = JSON.parse(read("schemas/manifest.schema.json"));
-  const dm = manifest.properties.waves.items.properties.agents.items.properties.dispatch_mechanism;
-  assert.deepEqual(dm.enum, ["endpoint", "host_subagent"], "manifest schema's dispatch_mechanism enum matches SKILL.md's values exactly");
+  const dm = manifest.properties.dag.properties.tasks.items.properties.dispatch_mechanism;
+  assert.deepEqual([...dm.enum].sort(), ["endpoint", "host_subagent"], "manifest schema's dispatch_mechanism enum matches SKILL.md's values exactly");
 });
 
 test("SKILL re-probes endpoint health and curl fresh at resume/relay, never trusting the rehydrated policy for reachability", () => {
@@ -1973,61 +1593,6 @@ test("SKILL states HTTP endpoint dispatch has full backend parity with no client
   );
 });
 
-test("DAG.3/DAG.4 dispatch and integration gates agree with plan-integrator.md's reservation and release steps", () => {
-  const skill = read("skills/run/SKILL.md");
-  const dag3 = skill.slice(skill.indexOf("### DAG.3"), skill.indexOf("### DAG.4"));
-  const dag4 = skill.slice(skill.indexOf("### DAG.4"), skill.indexOf("### DAG.5"));
-  const integrator = read("agents/plan-integrator.md");
-  assert.ok(dag3.length > 0 && dag4.length > 0, "DAG.3 and DAG.4 sections are present");
-
-  // DAG.3: a durable paths_reserved event gates dispatch, citing plan-integrator step 1
-  assert.match(
-    dag3,
-    /atomically persist that transition together with a schema-valid `paths_reserved` event \(`reservation_id`, `task_id`, `attempt`, and `paths`, the normalized union of `owned_files` and `shared_files`\), per `agents\/plan-integrator\.md` step 1/,
-    "DAG.3 requires a durable paths_reserved event before dispatch, citing plan-integrator step 1"
-  );
-  assert.match(
-    dag3,
-    /Only once the reservation is durable, append `task_dispatched` before native-subagent\/teammate dispatch/,
-    "DAG.3 only appends task_dispatched after the reservation is durable"
-  );
-  // retry ordering: the prior attempt's release is durable before a fresh reservation is created
-  assert.match(
-    dag3,
-    /a retry or re-execution reuses this same gate and must have durably recorded the prior attempt's `paths_released` release \(DAG\.4\) before this fresh reservation is created/,
-    "DAG.3 requires the prior attempt's paths_released before a retry's fresh reservation"
-  );
-
-  // DAG.4: a durable paths_released event gates re-dispatch on every terminal/disposal transition, citing plan-integrator step 8
-  assert.match(
-    dag4,
-    /atomically persist that terminal state transition together with a schema-valid `paths_released` event \(`reservation_id`, `task_id`, `attempt`, `paths`, `terminal_status`, and `integration_commit`\), releasing that attempt's reservation before its paths become dispatchable again/,
-    "DAG.4 requires a durable paths_released event before paths become dispatchable again"
-  );
-  assert.match(
-    dag4,
-    /the same release gate applies whenever the central integrator instead marks an attempt `BLOCKED` or disposes a worktree, per `agents\/plan-integrator\.md` step 8/,
-    "DAG.4's release gate also covers BLOCKED outcomes and worktree disposal, citing plan-integrator step 8"
-  );
-
-  // agents/plan-integrator.md steps 1 and 8 state the same two-event contract, so the files cannot drift apart again
-  assert.match(
-    integrator,
-    /Before\s+changing\s+the\s+task\s+record\s+to\s+`dispatched`\s+or\s+dispatching\s+a\s+developer,\s+test\s+author,\s+repair\s+worker,\s+or\s+re-execution,\s+the\s+scheduler\s+must\s+atomically\s+persist\s+the\s+state\s+transition\s+and\s+a\s+schema-valid\s+`event_type:\s+"paths_reserved"`\s+lifecycle\s+event/,
-    "plan-integrator step 1 requires paths_reserved before any writer dispatch"
-  );
-  assert.match(
-    integrator,
-    /When\s+an\s+attempt\s+becomes\s+`INTEGRATED`,\s+`BLOCKED`,\s+or\s+is\s+disposed,\s+the\s+scheduler\s+must\s+atomically\s+persist\s+that\s+terminal\/disposal\s+state\s+transition\s+and\s+a\s+schema-valid\s+`event_type:\s+"paths_released"`\s+lifecycle\s+event/,
-    "plan-integrator step 8 requires paths_released on every terminal/disposal transition"
-  );
-  assert.match(
-    integrator,
-    /Retrying\/re-executing\s+a\s+task\s+first\s+records\s+the\s+release\/disposal\s+of\s+the\s+old\s+attempt,\s+then\s+creates\s+a\s+fresh\s+`paths_reserved`\s+event\s+and\s+dispatch\s+transition\s+for\s+the\s+new\s+attempt/,
-    "plan-integrator step 8 states the same release-before-re-reserve retry ordering as DAG.3"
-  );
-});
-
 test("scripts/ declares no runtime dependency outside the Node standard library", () => {
   const pkg = JSON.parse(read("package.json"));
   assert.ok(!pkg.dependencies, "package.json declares no runtime dependencies");
@@ -2042,4 +1607,347 @@ test("scripts/ declares no runtime dependency outside the Node standard library"
       assert.ok(isLocal || isBuiltin, `${file} requires "${req}", which is neither a local module nor a Node standard-library builtin`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// 3.0.0 throughput changes. Each test pins one change that came out of a real
+// 25-hour run: the orchestrator re-typing text into prompts, slow and stalled
+// gates, a relay driver waiting on a runner that had already returned, no-git
+// runs verifying synchronously, and an invalid red costing a task a whole cycle.
+// ---------------------------------------------------------------------------
+
+test("bundled roles are delivered by path, never pasted into a prompt", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /deliver the complete role definition to that subagent \*\*by reference\*\*/, "role delivery is by reference");
+  assert.match(f, /ROLE DEFINITION: read <absolute role path> in full before anything else/, "the prompt's first line names the role file");
+  assert.match(f, /\*\*Do NOT paste a bundled role file's text into a prompt\.\*\*/, "pasting a bundled role is forbidden");
+  assert.match(f, /generated by you, token by token, before the subagent can start/, "records why: prompt text is orchestrator output");
+  // the fallback keeps sandboxed hosts working, and registration is still never relied on
+  assert.match(f, /\*\*Inline fallback\.\*\*[\s\S]{0,400}`role_delivery = "inline"`/, "a subagent that cannot read the role file gets it inline");
+  assert.match(f, /never through native agent registration/, "delivery never depends on agent registration");
+  assert.match(f, /reply with exactly ROLE_FILE_UNREADABLE and stop/, "the fallback has a mechanical detection token");
+  assert.match(f, /record `"role_delivery": "inline"` at the top level of the cycle-root `manifest\.json`/, "the fallback persists for later phase runners");
+  assert.match(f, /Exactly two dispatches still carry pasted definition text/, "the two pasting exceptions are named");
+  const manifestSchema = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.deepEqual(manifestSchema.properties.role_delivery.enum, ["path", "inline"], "manifest schema documents role_delivery");
+  assert.match(manifestSchema.properties.role_delivery.description, /pre-3\.0\.0/, "role_delivery notes back-compat");
+  // a project agent's definition stays inline: its position under the override is part of the guard
+  assert.match(f, /its position in the prompt -- above the contract that overrides it -- is part of the guard, so it stays inline/, "project-agent definitions stay inline");
+  // every bundled dispatch site routes through the rule
+  for (const role of ["plan-analyzer.md", "plan-verifier.md", "plan-aggregator.md"]) {
+    assert.match(
+      f,
+      new RegExp(`${role.replace(".", "\\.")}\`[^\\n]{0,120}\\*\\*Portable role loading\\*\\*`),
+      `${role} dispatch is delivered per Portable role loading`
+    );
+  }
+});
+
+test("the plan reaches the analyzer as a numbered file, and never enters the orchestrator's context", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /\*\*Do NOT read the plan into your own context\.\*\*/, "pre-flight validates the plan without reading it");
+  assert.match(f, /awk '\{printf "%4d\\t%s\\n", NR, \$0\}' "<plan path>" > "\$cycle_dir\/plan\.numbered\.txt"/, "the numbered copy is redirected straight to disk");
+  assert.match(f, /\*\*Never inline the plan into the analyzer prompt\.\*\*/, "the plan is never inlined");
+  assert.match(f, /record `plan_total_lines` with `awk 'END\{print NR\}' "<path>"`/, "the line count matches the numbering, trailing newline or not");
+  assert.match(f, /Numbered plan file: <absolute path to \$cycle_dir\/plan\.numbered\.txt>/, "analyzer prompt carries the file path");
+  assert.doesNotMatch(f, /PLAN_WITH_LINES/, "the inlined-plan variable is gone");
+  const analyzer = read("agents/plan-analyzer.md");
+  assert.match(analyzer, /numbered plan file/i, "analyzer reads the numbered plan file");
+  assert.match(analyzer, /page through it[\s\S]{0,80}until you have covered every line/, "analyzer pages through a large plan");
+  assert.doesNotMatch(analyzer, /Do NOT use the Read tool/, "the old no-Read rule is gone");
+});
+
+test("Gate discipline: file-backed logs, time budgets, foreground waits, and an honest did-not-run state", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /^## Gate discipline$/m, "the skill has a Gate discipline section");
+  assert.ok(f.indexOf("## Gate discipline") < f.indexOf("## Step 1: PRE-FLIGHT"), "it is global, ahead of pre-flight, so phase runners read it");
+  assert.match(f, /1\. \*\*File-backed output\.\*\*/, "rule 1: file-backed output");
+  assert.match(f, /Never stream a gate's output into your own context and never paste it into a prompt/, "gate output never enters a context or a prompt");
+  assert.match(f, /2\. \*\*Time budget\.\*\*[\s\S]{0,500}`result: "TIMEOUT"`/, "rule 2: a gate past budget records TIMEOUT");
+  assert.match(f, /never a pass, and never a fabricated failure list/, "a timeout is never a pass and never a fabricated failure list");
+  assert.match(f, /3\. \*\*Wait in the foreground; never end your turn on a gate\.\*\*/, "rule 3: foreground waits");
+  assert.match(f, /\*\*Never end your turn, return, or go idle "waiting on" a monitor, watcher, timer, or background-completion notification while a gate is outstanding\.\*\*/, "no idling on a monitor");
+  assert.match(f, /4\. \*\*Did-not-run is its own state\.\*\*[\s\S]{0,300}`BUILD_FAILED`/, "rule 4: a build failure is not an empty failure set");
+  // every gate site routes through it
+  assert.match(f, /Every gate command runs under \*\*Gate discipline\*\*/, "wave gates run under Gate discipline");
+  assert.match(f, /under \*\*Gate discipline\*\* \(log: `\$cycle_dir\/gates\/baseline\.log`/, "the baseline runs under Gate discipline");
+  assert.match(f, /run the FULL test command exactly once in the integration worktree, under \*\*Gate discipline\*\*/, "boundary suites run under Gate discipline");
+});
+
+test("relay: a returned phase runner is never waited on, and a phase runner never re-runs the baseline", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /\*\*A returned runner is not running\.\*\*/, "driver rule is named");
+  assert.match(f, /is a \*\*premature return\*\*, never a reason to wait or to report the phase as "still running"/, "a non-summary return is a premature return");
+  assert.match(f, /a return that does not parse as a phase-summary at all/, "premature means unparseable, so it cannot overlap the interrupted branch");
+  assert.match(f, /A summary that parses with `status: interrupted` is NOT premature/, "an interrupted summary takes the interrupted path");
+  assert.match(f, /Recover at once, without asking/, "recovery is automatic");
+  assert.match(f, /Allow at most two recoveries per phase/, "recovery is bounded");
+  assert.match(f, /When the recoveries are exhausted, or `status` is `interrupted`, treat the phase as interrupted/, "exhausted recoveries fall back to the interrupted path");
+  assert.match(f, /\*\*This phase-summary is your only permitted return\.\*\*/, "runner rule is named");
+  assert.match(f, /agents and verifiers by polling their `return_file`/, "a phase runner polls return files instead of ending its turn");
+  assert.match(f, /\*\*A phase runner NEVER re-runs the baseline\*\*/, "phase runners load the baseline from the cycle-root manifest");
+  assert.match(f, /absorb earlier phases' regressions as "pre-existing"/, "records why a mid-cycle baseline is wrong, not just slow");
+  // a recovered or resumed phase can never report token coverage it does not have
+  assert.match(f, /\*\*The tally is durable, not in-memory\.\*\*/, "every scheduler session appends to one durable tally");
+  assert.match(f, /work that ran always counts toward `agents_total`/, "a lost session's agents still count toward coverage");
+  // resume reuses the recorded baseline; it captures only for a pre-2.3.0 checkpoint
+  assert.match(f, /\*\*Never re-capture the baseline on resume\.\*\*/, "resume reuses the baseline of record");
+  assert.match(f, /so an original `--test-cmd` survives the resume and the driver and its runners never diverge/, "R.3 loads the recorded test command");
+  // the DAG resume entry loads the same recorded settings
+});
+
+test("fix-plans name their gates and owners, and the analyzer pairs by what the task says", () => {
+  const aggregator = read("agents/plan-aggregator.md");
+  assert.match(aggregator, /^\*\*Tests:\*\* <test file path\(s\) that gate this fix, comma-separated, or `none`>$/m, "fix-plan template has a Tests line");
+  assert.match(aggregator, /\*\*Name the gate\.\*\*/, "rule: name the gate");
+  assert.match(aggregator, /\*\*Every cited file gets an owner\.\*\*/, "rule: every cited file gets an owner");
+  assert.match(aggregator, /\*\*Blockers first\.\*\*/, "rule: blockers first");
+  assert.match(aggregator, /Never guess a nearby test file/, "the aggregator never guesses a gate");
+  const analyzer = read("agents/plan-analyzer.md");
+  assert.match(analyzer, /\*\*Pair by what the task says, never by proximity\.\*\*/, "analyzer pairs by the task's own text");
+  assert.match(analyzer, /`\*\*Tests:\*\* none` means `role: "standalone"`/, "Tests: none is a standalone task");
+  assert.match(analyzer, /A named test file that does not exist on disk[\s\S]{0,120}gets a test-author task that owns it/, "a named but missing test file is authored, never an unresolvable gate");
+  assert.match(aggregator, /a file appears on exactly one `\*\*File:\*\*` line/, "no two fix tasks own the same file");
+});
+
+// ---------------------------------------------------------------------------
+// 3.0.0: the task DAG is the ONLY executor. The wave executor, its no-Git
+// fallback, configurable verification coverage, and wave-shaped artifacts are gone.
+// These tests pin the DAG-only pipeline end to end.
+// ---------------------------------------------------------------------------
+
+test("the task DAG is the only executor: no waves, no wave flags, no fallback", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /plan-runner has ONE executor: the dependency-ready task DAG \(ADR-0006\)/, "one executor");
+  assert.match(f, /there are no waves and no wave barriers/, "no wave barriers");
+  assert.match(f, /Error: the wave executor was removed in plan-runner 3\.0\.0\. Plans run as a task DAG only\./, "--execution-mode wave is a hard error");
+  assert.match(f, /`--verify <mode>`, `--sync-verify`, and `--execution-mode dag` are accepted and ignored/, "removed flags are accepted and ignored, never a crash");
+  for (const gone of [/## Step 2-bis: SLICE INTO PHASES/, /## Step 4: WAVE EXECUTION/, /### 4b\. Commit the wave/, /wave_start_sha/, /verify_mode/, /max_waves_per_phase:\s*\d/, /\$phase_dir/, /wave-<W>/, /### DAG\.\d/]) {
+    assert.doesNotMatch(f, gone, `wave-era construct is gone: ${gone}`);
+  }
+  assert.ok(!exists("schemas/wave-plan.schema.json"), "the wave-plan schema is removed");
+  const analyzer = read("agents/plan-analyzer.md");
+  assert.match(analyzer, /There are no waves -- you never bucket, batch, or order tasks beyond their real dependencies/, "the analyzer emits a graph, not waves");
+  assert.doesNotMatch(analyzer, /"waves":/, "the analyzer output has no waves array");
+  assert.match(analyzer, /## Graph rules \(these are hard constraints\)/, "graph rules replace bucketing rules");
+  assert.match(analyzer, /`<base id>-test` and `<base id>-impl`/, "TDD split uses stable task ids");
+  assert.match(analyzer, /Two tasks MAY own the same file: the scheduler never runs overlapping owners at the same time/, "overlap is the scheduler's job, not a reason to invent an edge");
+});
+
+test("Git with usable worktrees is required; DAG execution is never approximated on a shared tree", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 1b-bis\. Require Git and usable worktrees/, "pre-flight requires Git");
+  assert.match(f, /\*\*Never approximate DAG execution on a shared working tree\*\*/, "no shared-tree approximation");
+  assert.match(f, /plan-runner needs a Git repository with usable worktrees/, "the STOP message says what is needed");
+  assert.match(f, /git add -A && git commit -m "baseline"/, "the STOP message says how to prepare the directory");
+  assert.match(f, /Then re-run\. Nothing was changed\./, "a failed pre-flight changes nothing");
+  assert.match(f, /A resume still requires Git and usable worktrees/, "resume re-checks the requirement");
+  assert.match(read("CLAUDE.md"), /Git with usable worktrees is required/, "CLAUDE.md invariant replaces git-is-optional");
+});
+
+test("worktree bootstrap: untracked dependencies are linked, never rebuilt per task, and never committed", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 1c-ter\. Worktree bootstrap/, "has a bootstrap step");
+  assert.match(f, /A fresh worktree contains only what Git tracks\./, "records why it exists");
+  assert.match(f, /share: auto\s+# auto \(default\) \| none \| a list of repo-relative untracked directories/, "share key and default");
+  assert.match(f, /`auto` resolves to whichever of `node_modules`, `\.venv`, `venv`, and `vendor` exist at the repository root and are untracked/, "auto is conservative: dependency dirs only");
+  assert.match(f, /A link is never task output\./, "links never reach a commit");
+  assert.match(f, /git add -A -- \. ':\(exclude\)<name>'/, "staging excludes every shared name");
+  assert.match(f, /`dag\.worktree\.share` records the RESOLVED list \(never `auto`\)/, "later sessions bootstrap identically");
+  const schema = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.equal(schema.properties.dag.properties.worktree.properties.share.type, "array", "manifest schema records the resolved share list");
+});
+
+test("scheduler: dependency-ready, six active tasks, progress by file, never idle", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /## Step 4: TASK EXECUTION \(dependency-ready scheduler\)/, "Step 4 is the scheduler");
+  assert.match(f, /without waiting for unrelated active or ready work/i, "ready tasks do not wait for unrelated work");
+  assert.match(f, /six active dev tasks total/i, "the six-task ceiling holds");
+  assert.match(f, /Prefer, among the ready tasks, the one with the most transitive dependents/, "critical-path-first selection");
+  assert.match(f, /Progress is a file/, "the scheduler advances on durable files");
+  assert.match(f, /\*\*Never end your turn while any task is active\*\*/, "a scheduler never idles on a notification");
+  assert.match(f, /the schedule degrades to dependency-correct batches/, "a blocking-dispatch host still schedules correctly");
+  // reservations agree with the integrator protocol
+  const integrator = read("agents/plan-integrator.md");
+  assert.match(f, /atomically persist that transition together with a schema-valid `paths_reserved` event \(`reservation_id`, `task_id`, `attempt`, and `paths`, the normalized union of `owned_files` and `shared_files`\), per `\.\.\/\.\.\/agents\/plan-integrator\.md` step 1/, "dispatch is gated on a durable paths_reserved event");
+  assert.match(f, /Only once the reservation is durable, append `task_dispatched`, then dispatch/, "task_dispatched follows the reservation");
+  assert.match(f, /must have durably recorded the prior attempt's `paths_released` release \(4e\) before this fresh reservation is created/, "a repair releases before it re-reserves");
+  assert.match(f, /atomically persist that terminal transition together with a schema-valid `paths_released` event \(`reservation_id`, `task_id`, `attempt`, `paths`, `terminal_status`, and `integration_commit`\)/, "terminal states release the reservation durably");
+  assert.match(f, /per `\.\.\/\.\.\/agents\/plan-integrator\.md` step 8/, "release cites integrator step 8");
+  assert.match(f, /This permits a child of a fast integrated task to start while an unrelated slow task remains active\./, "the throughput property is stated");
+  assert.match(integrator, /Reserve paths before any writer dispatch/, "integrator step 1 still defines the reservation");
+  assert.match(integrator, /Release every reservation with durable evidence/, "integrator step 8 still defines the release");
+});
+
+test("per-task pipeline: scheduler commits, ownership is a set comparison, gates run in the task worktree", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 4a-bis\. Tear down the task agent/, "per-task teardown");
+  assert.match(f, /never let finished agents idle until the run ends/, "agents are released as each returns");
+  assert.match(f, /The scheduler, never the agent, commits a task's work/, "the scheduler commits");
+  assert.match(f, /git diff --name-status -M -C/, "ownership evidence is the complete rename-aware diff");
+  assert.match(f, /This is a set comparison, not a judgment/, "ownership conformance is mechanical");
+  assert.match(f, /Never silently discard an undeclared write and never widen ownership to fit it\./, "undeclared writes are never hidden");
+  assert.match(f, /\*\*inside the task's worktree\*\* -- the only tree that contains this task's work and nobody else's unfinished edits/, "gates run in isolation");
+  assert.match(f, /\*\*Every gated task -> scoped checks\.\*\*/, "scoped checks are the per-task regression net");
+  assert.match(f, /\*\*Gate evidence is a pointer, never a paste\.\*\*/, "gate evidence travels as log paths");
+  // rogue commits cannot reach the branch
+  assert.match(f, /git -C "<worktree_path>" log --oneline <base_commit>\.\.HEAD/, "rogue-commit guard inspects the task branch");
+  assert.match(f, /A rogue commit can never reach the integration branch on its own: only 4f applies commits there\./, "only central integration mutates the branch");
+  // agents may check their own work in their own worktree; it is never evidence
+  const dev = read("agents/plan-dev.md");
+  assert.match(dev, /\*\*Run only your own targeted tests\.\*\*/, "dev agents may run their targeted tests");
+  assert.match(dev, /Your runs are never evidence: the orchestrator re-runs the green gate itself after you return, and only that run counts\./, "an agent's own run is never evidence");
+  assert.match(read("agents/plan-test-author.md"), /Your runs are never evidence -- the orchestrator runs the red gate itself/, "same for test authors");
+});
+
+test("verification is per task, not configurable, and off the scheduler's critical path", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /verification is not configurable, because a task cannot integrate without a verdict/, "every task attempt is verified");
+  assert.match(f, /That tree is already a pinned snapshot: nothing else writes to it while the verdict is pending/, "the task worktree is the snapshot");
+  assert.match(f, /\*\*Do NOT wait\.\*\* Persist status `verifying`[^\n]{0,140}dispatch the verifier asynchronously, and return to the scheduling loop/, "verification never blocks scheduling");
+  assert.match(f, /No-self-verify rule \(both backends, hard requirement\)/, "no-self-verify survives");
+  assert.match(f, /A late or missing verdict becomes a tracked bug, never a silently-integrated task\./, "a missing verdict blocks integration");
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /You are the independent verifier of one task attempt/, "the verifier verifies one task");
+  assert.match(verifier, /never under the process working directory \(which is the operator's checkout and does not contain this task's work\)/, "paths resolve in the task worktree");
+  assert.match(verifier, /\*\*Severity decides integration, so assign it honestly\.\*\*/, "severity is load-bearing");
+  assert.match(verifier, /\*\*Open each log yourself\*\*/, "the verifier reads gate logs by path");
+  assert.match(verifier, /`TIMEOUT` proves nothing in either direction/, "a timed-out gate is never a pass");
+});
+
+test("integration is severity-gated, repair is bounded at one, and integration is mechanical", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /A finding \*\*blocks integration\*\* when it is severity P0 or P1, when ownership conformance is `FAIL`, when the deterministic check is `FAIL`, or when the verdict is `UNVERIFIABLE`/, "what blocks integration");
+  assert.match(f, /P2 and P3 findings do not hold a task, or the subtree behind it, out of the branch/, "nits never cost the dependents their turn");
+  assert.match(f, /request exactly one evidence-backed repair attempt/, "one repair");
+  assert.match(f, /REPAIR ATTEMPT \(2 of 2\)/, "the repair dispatch is labeled as the last attempt");
+  assert.match(f, /Never retry speculatively or erase prior evidence\./, "no speculative retries");
+  assert.match(f, /except when `baseline_state` is `build_failed` or `timeout`/, "an unbuildable baseline does not block every task");
+  assert.match(f, /This is what lets a repair plan run against a codebase that does not compile yet\./, "records why");
+  assert.match(f, /Integration is the ONLY place the run-owned branch is mutated, it happens one task at a time/, "integration is central and serial");
+  assert.match(f, /dispatching an agent for every integration would put a serialized LLM round trip behind every task in the run/, "the mechanical path needs no agent");
+  assert.match(f, /cherry-pick <base_commit>\.\.<task_commit>/, "verified commits are applied by cherry-pick");
+  assert.match(f, /A second conflict marks the task `blocked`\./, "conflict rebuild is capped at one");
+  const integrator = read("agents/plan-integrator.md");
+  assert.match(integrator, /the scheduler executes its mechanical path directly/, "integrator role agrees");
+  assert.match(integrator, /P2 and P3 findings do not block integration/, "integrator role agrees on severity gating");
+});
+
+test("the full suite runs rarely: baseline, phase boundaries, and one final verification that gates delivery", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /\*\*The full suite runs rarely, by design\.\*\*/, "stated in pre-flight");
+  assert.match(f, /### 4h\. Boundary suite \(phase boundaries only\)/, "boundary suite");
+  assert.match(f, /\*\*expected-red\*\* file -- a test file owned by an integrated test-author task whose paired impl task is not yet integrated/, "expected reds are read from the graph and the task state");
+  assert.match(f, /### 4j\. Final verification \(once, after every task is terminal\)/, "final verification");
+  assert.match(f, /`unverifiable` -- the suite did not run \(`BUILD_FAILED`\) or did not finish \(`TIMEOUT`\); never recorded as a pass/, "did-not-run is never a pass");
+  assert.match(f, /Skip the PR step, and print why/, "a failed or unverifiable final suite opens no PR");
+  assert.ok(f.indexOf("### 4j. Final verification") < f.indexOf("## Step 5: AGGREGATE"), "final verification precedes aggregation");
+});
+
+test("phases are integration-count checkpoints; every run writes a run-state and one manifest", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /EVERY run writes it, phased or not/, "every run is resumable");
+  assert.match(f, /`T <= max_integrations_per_phase`/, "phasing activates on task count");
+  assert.match(f, /A \*\*phase\*\* is one scheduler session, numbered `P` = the count of `checkpoint` events already in `events\.jsonl`, plus one/, "a phase is a scheduler session with a collision-free number");
+  assert.match(f, /Waves are not counted anywhere\./, "no wave counting");
+  assert.match(f, /It is the single cycle manifest: every scheduler session \(this one, every relay phase runner, every resumed session\) appends to the same file\./, "one manifest, no per-phase manifests");
+  assert.match(f, /There is nothing to roll up: the cycle has one manifest, and every scheduler session wrote to it\./, "no cross-phase roll-up");
+  assert.match(f, /It is the run's only plan artifact; there is no wave plan\./, "task-graph.json is the only plan artifact");
+});
+
+test("coverage gate is per task and stays upstream of the PR step", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### 5\.0\. Verifier-coverage gate \(runs before counting, on every path\)/, "the gate exists");
+  assert.match(f, /assert that \*\*every\*\* graph task has a verdict on disk or a durable reason it never needed one/, "every task is covered");
+  assert.match(f, /never aggregate over a task that is still in flight/, "an unfinished scheduler cannot aggregate");
+  assert.match(f, /This gate makes it structurally impossible to reach the PR step/, "upstream of the PR step");
+  assert.ok(f.indexOf("### 5.0. Verifier-coverage gate") < f.indexOf("### 5.1. Count and aggregate"), "the gate runs before counting bugs");
+  assert.ok(f.indexOf("### 5.0. Verifier-coverage gate") < f.indexOf("## Step 8: OPEN PR"), "the gate precedes the PR step");
+});
+
+test("resume is DAG-only: a wave checkpoint cannot resume, the baseline is never re-captured, the operator checkout is never touched", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /### R\.3\. Validate the checkpoint against its branch, graph, and events/, "R.3 validates the DAG checkpoint");
+  assert.match(f, /A pre-3\.0\.0 checkpoint -- a run-state with no `dag` member, written by the removed wave executor -- cannot be resumed\./, "wave checkpoints are refused, never reinterpreted");
+  assert.match(f, /this consumes no repair budget, because no verdict was ever produced/, "a lost session is not a failed attempt");
+  assert.match(f, /\*\*Never re-capture the baseline on resume\.\*\*/, "the baseline of record survives a resume");
+  assert.match(f, /The operator's checkout needs no decision on resume: plan-runner never wrote to it/, "no dirty-tree prompt on resume");
+  for (const gone of [/### R\.6\./, /### R\.7\./, /resume_from_wave/]) assert.doesNotMatch(f, gone, `wave recovery is gone: ${gone}`);
+});
+
+test("a fix-plan re-run builds on the previous cycle's integrated work", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /`--base <ref>` -- internal, passed by the Step 6 fix-plan re-run/, "the internal base flag exists");
+  assert.match(f, /a re-run based on the operator's `HEAD` would be fixing code that is not there/, "records why");
+  assert.match(f, /<absolute path to fix-plan\.md> --base <this cycle's dag\.integration_branch>/, "the handoff passes the base");
+  assert.match(f, /skip the dirty-checkout prompt below -- nothing is read from the operator's working tree/, "a based re-run never prompts about the operator tree");
+});
+
+test("code-atlas sync is deferred to the merge; the PR comes from the run-owned branch and tolerates blocked tasks", () => {
+  const f = read("skills/run/SKILL.md");
+  assert.match(f, /## Step 7-bis: CODE ATLAS \(deferred until the PR merges\)/, "no pre-PR atlas sync");
+  assert.match(f, /An incremental atlas update run now would diff an unchanged tree and index nothing/, "records why");
+  const pr = read("skills/pr/SKILL.md");
+  assert.match(pr, /A\s+`blocked` task does NOT make the run ineligible/, "blocked tasks do not suppress the PR");
+  assert.match(pr, /Set `want_draft = \(total_bugs > 0\) OR \(any task is blocked\)`/, "blocked tasks force a draft");
+  assert.match(pr, /tasks are blocked and are NOT in this branch/, "the PR body names what is missing");
+  assert.match(pr, /Diff the run-owned branch by name, never `HEAD`/, "the diff never uses the operator's HEAD");
+  assert.doesNotMatch(pr, /waves_skipped|wave-plan\.json|legacy manifest/, "the pr skill carries no wave-era paths");
+  assert.match(read("agents/plan-aggregator.md"), /\*\*A blocked task is unfinished work, not just a bug\.\*\*/, "blocked tasks are re-planned, not patched");
+});
+
+test("schemas: wave-era requirements relaxed, DAG-only fixtures registered", () => {
+  const manifest = JSON.parse(read("schemas/manifest.schema.json"));
+  assert.ok(!manifest.required.includes("waves"), "a DAG-only manifest has no waves array");
+  assert.ok(manifest.properties.token_usage.properties.by_agent.items.properties.phase.enum.includes("task"), "by_agent gains the task phase");
+  assert.ok(manifest.properties.token_usage.properties.by_agent.items.properties.phase.enum.includes("integrate"), "by_agent gains the integrate phase");
+  for (const key of ["baseline_state", "baseline_suite_seconds", "gates"]) {
+    assert.match(manifest.properties.tdd.properties[key].description, /pre-3\.0\.0/, `${key} notes back-compat`);
+  }
+  const bug = JSON.parse(read("schemas/bug-report.schema.json"));
+  const bugId = new RegExp(bug.properties.bugs.items.properties.bug_id.pattern);
+  assert.ok(bugId.test("task-002-add-user-model-impl-bug-1"), "task-based bug ids validate");
+  assert.ok(bugId.test("wave-1-agent-1-bug-1"), "pre-3.0.0 bug ids still validate");
+  const dev = JSON.parse(read("schemas/dev-return.schema.json"));
+  assert.ok(new RegExp(dev.properties.agent_id.pattern).test("task-002-add-user-model-impl-a1"), "task-based agent ids validate");
+  const graph = JSON.parse(read("schemas/task-graph.schema.json"));
+  assert.ok(graph.properties.served_model, "the task graph carries the analyzer's served_model");
+  const validator = read("tests/validate_schemas.py");
+  for (const fixture of ["manifest-dag-only-valid.json", "run-state-dag-only-valid.json", "bug-report-task-valid.json"]) {
+    assert.ok(exists(`schemas/examples/${fixture}`), `${fixture} exists`);
+    assert.match(validator, new RegExp(fixture.replace(/\./g, "\\.")), `${fixture} is registered`);
+  }
+  assert.doesNotMatch(validator, /wave-plan/, "the wave-plan case is gone");
+});
+
+test("review hardening: task states, empty ranges, mechanical blocks, cleanup, and link safety", () => {
+  const f = read("skills/run/SKILL.md");
+  // the state machine matches what run-state.schema.json validates per status
+  assert.match(f, /\*\*Task states\.\*\* `pending` -> `dispatched` \(attempt 1 in flight\) -> `verifying`/, "the task state machine is spelled out");
+  assert.match(f, /a task being repaired is still active/, "a repair keeps its place under the six-task ceiling");
+  assert.match(f, /A same-worktree repair \(4e\) skips this paragraph entirely: it keeps attempt 1's `worktree_path` and `base_commit`/, "a repair never moves its base, so the ownership diff stays the task's own work");
+  assert.match(f, /A task gets ONE second attempt, whatever triggered it/, "repair, re-execution, and conflict rebuild share one budget (attempts max 2)");
+  assert.match(f, /never wipe the commit a repair builds on/, "a lost repair agent does not erase attempt 1");
+  // an already-satisfied task is not blocked for having nothing to commit
+  assert.match(f, /record `task_commit` = `base_commit` and carry on through every step/, "an empty range still runs ownership, gates, and verification");
+  assert.match(f, /an empty range applies nothing, and its `integrated_commit` is the current integration HEAD/, "an empty range integrates as a no-op");
+  // a blocked task always reaches the fix-plan
+  assert.match(f, /A blocked task with no bug would vanish from the fix-plan, and the run would report zero bugs with work missing from the branch\./, "mechanical blocks get a relayed P0");
+  // nothing leaks, nothing is double-run, nothing is deleted through a link
+  assert.match(f, /\*\*A STOP before the first dispatch cleans up what this step created\.\*\*/, "pre-dispatch STOPs remove the run-owned branch and worktree");
+  assert.match(f, /append a `checkpoint` event with `reason: malformed task graph`/, "the malformed-graph event validates (task_blocked needs a task id)");
+  assert.match(f, /any later session finds it with `git worktree list --porcelain`/, "a phase runner or resumed session can find the integration worktree");
+  assert.match(f, /do NOT continue to Step 4j, Step 5, Step 6, or any terminal step -- even when this phase made the last task terminal/, "a phase runner never runs final verification");
+  assert.match(f, /\*\*Unlink before you remove\.\*\*/, "links are removed before any worktree is");
+  assert.match(f, /never a recursive delete that could follow the link into the operator's real `node_modules` or build cache/, "records what the unlink rule protects");
+  assert.match(f, /`base_flag` unset -- a Step 6 fix-plan re-run must never be diverted into resuming some other run/, "a based re-run skips the resume offer");
+  const integrator = read("agents/plan-integrator.md");
+  assert.match(integrator, /\*\*You have no shell and you never run git\*\*/, "the integrator agent is told it cannot mutate anything");
+  assert.match(integrator, /share ONE second\s+attempt/, "the integrator agrees on the shared retry budget");
+  const verifier = read("agents/plan-verifier.md");
+  assert.match(verifier, /Handle BLOCKED and NEEDS_CONTEXT agents/, "NEEDS_CONTEXT is a P0, as the scheduler assumes");
+  assert.match(verifier, /P2 when `baseline_state` is `build_failed` or `timeout`/, "a gate timeout does not defeat the unbuildable-baseline exception");
+  const pr = read("skills/pr/SKILL.md");
+  assert.match(pr, /skipping superseded first-attempt reports \(`\*\.a1\.json`\)/, "repaired tasks are not double-counted");
+  assert.match(pr, /gh pr ready "<number>" --undo/, "a ready PR can be pulled back to draft");
 });

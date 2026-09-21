@@ -3,9 +3,9 @@ name: pr
 user-invocable: false
 description: >
   Internal plan-runner step (invoked by the run skill at pipeline end, not run
-  directly): push the current branch and open or update a proper pull request --
-  conventional title, rich structured body (summary, whole-branch diff, bug counts,
-  stats), and a smart draft/ready default based on remaining bugs. Reads everything
+  directly): push the run-owned integration branch and open or update a proper pull
+  request -- conventional title, rich structured body (task outcomes, whole-branch diff,
+  bug counts, stats), and a smart draft/ready default based on remaining bugs and blocked tasks. Reads everything
   from the completed cycle directory passed as the argument.
 ---
 
@@ -41,35 +41,36 @@ Error: cannot read manifest at <cycle_dir>/manifest.json -- cannot build a PR.
 
 Then STOP.
 
-From the manifest capture: `cycle`, `backend`, `total_bugs`, `input_plan`, the
-`waves` array (length = wave count; sum of each wave's `agents` length = dev agent
-count), and `token_usage` (may be absent on pre-1.5.0 manifests, or null).
+From the manifest capture: `cycle`, `backend`, `total_bugs`, `input_plan`, the `dag`
+object (`dag.tasks` length = task count; tasks with `status: "integrated"` and
+`status: "blocked"` counted separately; dev dispatch count = the number of
+`token_usage.by_agent` entries whose `phase` is `task`), and
+`token_usage` (may be null).
 
-Also capture optional `dag` delivery evidence. A missing `dag` means this is a
-legacy wave/phase run and preserves the branch behavior below. For a DAG manifest,
-`dag.integration_branch` is the only permitted PR source; `dag.branch_owned` must
-be `true`; every `dag.tasks[]` entry where `required` is `true` must have
-`status: "integrated"` and an `integrated_commit`; and
-`dag.final_verification.status` must be `"passed"`. These are eligibility checks,
-not fields to infer or repair. If any required evidence is missing or fails, print
-the reason and STOP -- do not push, open, update, merge, or auto-merge a PR.
+A manifest with no `dag` object was written by the wave executor, which was removed in
+plan-runner 3.0.0; there is no run-owned branch to deliver. Print `plan-runner:pr: this
+manifest predates the task-DAG executor (no dag evidence) -- nothing to open a PR from.`
+and STOP.
 
-Read `$cycle_dir/wave-plan.json` for the per-agent `task_title` values (used for the
-Summary section). If it is missing, fall back to an empty task list.
+**Eligibility (checks, never fields to infer or repair).** `dag.integration_branch` is
+the only permitted PR source; `dag.branch_owned` must be `true`; every `dag.tasks[]`
+entry must be terminal (`integrated` or `blocked`) -- a task still in flight means the
+run is not finished; at least one task must be `integrated` with an
+`integrated_commit`; and `dag.final_verification.status` must be `"passed"`. A
+`blocked` task does NOT make the run ineligible: the verified work that did integrate
+is still worth a human's review, and the PR opens as a draft that names every blocked
+task (Steps 5 and 6). If any check fails, print the reason and STOP -- do not push,
+open, update, merge, or auto-merge a PR.
 
-Also capture `verification` (may be absent on pre-1.9.0 manifests, or null). When
-absent, treat it as `{"mode": "per-wave", "waves_total": <wave count>, "waves_verified":
-<wave count>, "waves_skipped": 0}` -- i.e. full coverage.
+Read `$cycle_dir/task-graph.json` for the per-task `task_title` values (used for the
+Summary section). If it is missing, fall back to the task ids alone.
 
 ## Step 2: Resolve branches and guard
 
-For a legacy manifest (no `dag`), run:
-
-```bash
-git branch --show-current
-```
-
-Capture as `branch`. Then resolve the base branch:
+Do **not** use `git branch --show-current` as the PR source and do **not** check out
+any branch: the operator's checkout is not part of this run. Set
+`branch = dag.integration_branch` (the Step 1 eligibility checks already passed). Resolve
+the base branch:
 
 ```bash
 git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's#^origin/##'
@@ -77,17 +78,7 @@ git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's#^origin/##'
 
 Capture as `base`. If the command produces no output, set `base = "main"`.
 
-Guard: if `branch` is empty (detached HEAD) OR `branch` equals `base`, `main`, or
-`master`, print and STOP:
-
-```
-plan-runner:pr: current branch is "<branch>" -- refusing to open a PR from the base
-branch. Check out a feature branch and re-run.
-```
-
-For a DAG manifest, do **not** use `git branch --show-current` as the PR source and
-do **not** check out any branch. Set `branch = dag.integration_branch` only after
-the Step 1 eligibility checks pass. Confirm that the local ref exists with:
+Confirm that the local ref exists with:
 
 ```bash
 git rev-parse --verify "refs/heads/<branch>"
@@ -95,19 +86,19 @@ git rev-parse --verify "refs/heads/<branch>"
 
 If it does not exist, print and STOP: `plan-runner:pr: run-owned integration branch
 "<branch>" is unavailable locally -- refusing to substitute the operator branch.`
-Resolve `base` as above. Refuse `branch` values equal to `base`, `main`, or `master`
-with the same guard message. The integration branch is run-owned evidence: never
-fall back to the operator's active branch.
+Guard: if `branch` equals `base`, `main`, or `master`, print and STOP:
+
+```
+plan-runner:pr: integration branch is "<branch>" -- refusing to open a PR from the base
+branch.
+```
+
+The integration branch is run-owned evidence: never fall back to the operator's active
+branch.
 
 ## Step 3: Push the branch
 
-For a legacy manifest, run:
-
-```bash
-git push -u origin "<branch>"
-```
-
-For a DAG manifest, push the named integration ref without changing checkout:
+Push the named integration ref without changing checkout:
 
 ```bash
 git push -u origin "refs/heads/<branch>:refs/heads/<branch>"
@@ -130,7 +121,7 @@ If the push fails, print the git error and STOP (a PR needs a remote branch).
      as a title subject.
    - The resolved plan's first H1 line. Read the resolved `input_plan` and take the
      first line matching `^#\s+(.+)$`; use the captured text.
-   - Otherwise the first `task_title` from `wave-plan.json`.
+   - Otherwise the first `task_title` from `task-graph.json`.
    - Otherwise the literal `plan-runner run`.
 2. Determine the type: if the basename of the resolved `input_plan` (from step 1 --
    the original plan when one was resolved through a fix-plan, never the fix-plan
@@ -143,7 +134,7 @@ If the push fails, print the git error and STOP (a PR needs a remote branch).
 
 ## Step 5: Build the PR body
 
-Read every `$cycle_dir/bugs/*.json` (if the directory exists). Each file has a `bugs`
+Read every `$cycle_dir/bugs/*.json` (if the directory exists), skipping superseded first-attempt reports (`*.a1.json`): a repaired task's current report already carries whatever survived. Each file has a `bugs`
 array whose entries carry a `severity` of `P0`..`P3`. Tally counts per severity.
 
 Compute the whole-branch diff summary against the base branch's REMOTE tip, never
@@ -160,26 +151,28 @@ such remote branch), print `plan-runner:pr: could not fetch origin/<base>; diffi
 against local <base>, which may be stale` and set `diff_base = "<base>"`. Then:
 
 ```bash
-git diff --numstat "<diff_base>...HEAD"
+git diff --numstat "<diff_base>...refs/heads/<branch>"
 ```
+
+Diff the run-owned branch by name, never `HEAD`: `HEAD` is the operator's checkout,
+which this run never touched.
 
 Sum column 1 (insertions) and column 2 (deletions) across all rows for totals; count
 the rows for files-changed; keep the up-to-10 rows with the largest (ins+del) as the
 "most-changed files" list (path with `+ins/-del`).
 
-Assemble the body as Markdown (no "Test plan" section). When `verification.waves_skipped
-> 0`, prepend these lines as the FIRST lines of the body, before `## Summary`:
+Assemble the body as Markdown (no "Test plan" section). When any task is `blocked`,
+prepend these lines as the FIRST lines of the body, before `## Summary`:
 
 ```
 > [!WARNING]
-> Verification: <verification.mode> -- <verification.waves_skipped> of
-> <verification.waves_total> waves not semantically verified.
+> <blocked count> of <task count> tasks are blocked and are NOT in this branch:
+> <comma-joined blocked task ids>. See the fix plan.
 ```
 
 ```
 ## Summary
-<one "- <task_title>" bullet per agent task from wave-plan.json; "- (no tasks recorded)" if empty>
-<for a DAG manifest, instead list one bullet per dag.tasks entry as "- <task_id>: <status> (attempts: <attempts>; integrated: <integrated_commit or n/a>; verification: <verification_artifacts count> artifacts; retry evidence: <retry_evidence count>)">
+<one bullet per dag.tasks entry, integrated tasks first: "- <task_title> (<task_id>): <integrated <integrated_commit, 7 chars> | BLOCKED: <block_reason>> (attempts: <attempts>; bugs: <bug_count>)"; "- (no tasks recorded)" if empty>
 
 ## Changes
 <files-changed> files changed, +<total insertions> / -<total deletions>
@@ -191,23 +184,20 @@ Most-changed files:
 P0: <n>   P1: <n>   P2: <n>   P3: <n>   (total: <total_bugs>)
 <if total_bugs == 0, print "None flagged." instead of the counts line>
 
-<if any agent entry carries a non-null `model_substituted`, insert this section here; omit entirely otherwise:>
+<if any task entry carries a non-null `model_substituted`, insert this section here; omit entirely otherwise:>
 ## Model substitutions
-<one "- <agent>: <configured> -> <dispatched> (<reason>)" line per substituted agent>
+<one "- <task id>: <configured> -> <dispatched> (<reason>)" line per substituted task>
 
 ## plan-runner stats
 - Cycles: <cycle>
-- Waves: <wave count>
-- Dev agents: <dev agent count>
+- Tasks: <integrated count>/<task count> integrated (<blocked count> blocked)
+- Dev agents: <dev dispatch count, repairs included>
 - Backend: <backend>
 - Agent sources: <bundled count and per-project-agent counts -- see below; line omitted when absent>
 - Tokens: <token_usage.total_tokens> across <agents_reported>/<agents_total> subagents<if token_usage present but not complete: " (partial)">
-  - By phase: analyze <sum>, dev <sum>, verify <sum>, aggregate <sum>
+  - By phase: analyze <sum>, dev <sum>, verify <sum>, integrate <sum>, aggregate <sum>
 
-<for a DAG manifest, add these lines:>
-- Execution mode: task DAG
 - Integration branch: <dag.integration_branch> (run-owned)
-- Required tasks: <integrated required task count>/<required task count> integrated
 - Final verification: <dag.final_verification.status> (<artifact count> artifacts)
 - Lifecycle events: <dag.events_path>
 <if dag.stop_reason is non-null: "- Last stop reason: <dag.stop_reason>">
@@ -219,49 +209,45 @@ does not merge or enable auto-merge.
 The `By phase` sub-bullet is computed from `token_usage.by_agent`: group entries by
 `phase` and sum the non-null `total` values per phase, with thousands separators.
 Print `n/a` for a phase where nothing reported; omit a phase entirely when no
-subagent was dispatched in it (e.g. aggregate on a zero-bug run).
+subagent was dispatched in it (e.g. integrate when every integration was mechanical,
+aggregate on a zero-bug run). The manifest's `task` phase is the `dev` bucket.
 
 Omit the `Tokens:` line (and its `By phase` sub-bullet) entirely when `token_usage`
-is absent or null (pre-1.5.0 manifests, or a run where no figure was captured).
+is absent or null (a run where no figure was captured).
 
-The `Agent sources:` line is built from every wave's `agents[].agent_source` (see
-`schemas/manifest.schema.json`, added 1.19.0: `"bundled"` for the built-in
+The `Agent sources:` line is built from every task's `dag.tasks[].agent_source` (see
+`schemas/manifest.schema.json`: `"bundled"` for the built-in
 `plan-dev` role, or `"project:<name>"` when a project agent served the dispatch).
-Walk `waves[].agents[]` across the whole manifest and tally the exact
+Walk `dag.tasks[]` and tally the exact
 `agent_source` string of each entry that has one. Render `bundled <n>` first (when
 that bucket is non-empty), followed by one `project:<name> <n>` clause per distinct
 project agent, sorted alphabetically by name, each joined with `, `. Example:
 `Agent sources: bundled 3, project:frontend-dev-expert 2`.
 
-Omit the `Agent sources:` line entirely when no agent entry in any wave carries
-`agent_source` -- a manifest written before 1.19.0 predates the field, and every
-dispatch on it was necessarily bundled, but that is an inference, not a recorded
-fact, so it must not be reported. Tally only entries that actually carry the field;
+Omit the `Agent sources:` line entirely when no task entry carries
+`agent_source` -- an absent field may mean every dispatch was bundled, but that is an
+inference, not a recorded fact, so it must not be reported. Tally only entries that actually carry the field;
 never count, guess, or backfill a value for an entry that lacks it.
 
-Omit the verification banner entirely when `verification.waves_skipped` is 0 (full
-coverage -- nothing to warn about).
+Omit the warning banner entirely when no task is blocked (nothing to warn about).
 
 The `## Model substitutions` section is built the same way as `Agent sources:`
-above: walk `waves[].agents[]` across the whole manifest (for a DAG manifest, walk
-`dag.tasks[]` instead) and collect every entry whose `model_substituted` field
+above: walk `dag.tasks[]` and collect every entry whose `model_substituted` field
 (schema addition, model-selection-config feature) is non-null. Render one bullet
-per substituted agent or task, in manifest order: `- <agent or task id>:
+per substituted task, in manifest order: `- <task id>:
 <model_substituted.configured> -> <model_substituted.dispatched>
 (<model_substituted.reason>)`. Omit the whole section -- heading included -- when
-no entry in any wave or task carries a non-null `model_substituted`; a manifest
+no task entry carries a non-null `model_substituted`; a manifest
 written before this feature predates the field and every dispatch on it reported
 no substitution, so there is nothing to surface. This sits alongside the existing
 bug and verification counts precisely so a reviewer sees, in one place, whether a
-wave ran on a model other than the one configured.
+task ran on a model other than the one configured.
 
 ## Step 6: Decide draft state
 
-Set `want_draft = (total_bugs > 0) OR (verification.waves_skipped > 0)`. Unresolved
-bugs OR any wave left unverified (a reduced `verify_mode`) makes the PR a **draft**;
-only a run with zero bugs AND full semantic coverage opens **ready for review**. A
-reduced-coverage run opens as a draft even with zero bugs -- the work is not fully
-verified.
+Set `want_draft = (total_bugs > 0) OR (any task is blocked)`. Unresolved bugs OR any
+planned work missing from the branch makes the PR a **draft**; only a run with zero
+bugs AND every task integrated opens **ready for review**.
 
 ## Step 7: Create or update the PR
 
@@ -293,7 +279,7 @@ gh pr view "<branch>" --json number,isDraft,headRefName 2>/dev/null
 ```
 
 The positional selector is required even when the operator currently has some other
-branch checked out. In DAG mode, `<branch>` is the run-owned
+branch checked out. `<branch>` is the run-owned
 `dag.integration_branch` resolved in Step 2, so this lookup must never be replaced
 with an unqualified `gh pr view` or a lookup based on the active checkout.
 
@@ -314,8 +300,9 @@ with an unqualified `gh pr view` or a lookup based on the active checkout.
 
   Then reconcile draft state:
   - If `want_draft` is false and the existing PR `isDraft` is true: `gh pr ready "<number>"`.
-  - If `want_draft` is true and the existing PR is already ready: leave it as-is and
-    print a note (`gh` cannot re-mark a PR as draft).
+  - If `want_draft` is true and the existing PR is already ready: `gh pr ready "<number>" --undo`
+    (a late verdict or a blocked task must be able to pull a ready PR back to draft); if
+    that fails on an older `gh`, leave it as-is and print a note.
 
 Never run `gh pr merge`, enable auto-merge, or invoke a merge API. A ready PR is
 only ready for human review and delivery remains a human decision.

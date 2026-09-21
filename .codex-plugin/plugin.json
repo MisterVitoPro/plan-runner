@@ -1,7 +1,7 @@
 {
   "name": "plan-runner",
-  "version": "2.2.0",
-  "description": "Execute Markdown plans as safe task DAGs with isolated worktrees, independent verification, durable recovery evidence, and human-reviewed PR delivery; falls back to verified waves without Git.",
+  "version": "3.0.0",
+  "description": "Execute Markdown plans as dependency-ready task DAGs with isolated Git worktrees, independent verification, durable recovery evidence, and human-reviewed PR delivery. Requires Git.",
   "author": {
     "name": "MisterVitoPro",
     "url": "https://github.com/MisterVitoPro"
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Plan Runner",
     "shortDescription": "Execute plans as verified task DAGs",
-    "longDescription": "Analyze a Markdown plan into a dependency-ready task graph, run each ready task in its own disposable Git worktree with test-first and implementation agents, gate every task with deterministic checks and independent verification before a central integrator applies it to a run-owned branch, checkpoint durable task state for resume, aggregate bugs into a re-runnable fix plan, and open a human-reviewed pull request. Falls back to verified file-disjoint waves without Git.",
+    "longDescription": "Analyze a Markdown plan into a dependency-ready task graph, run each ready task in its own disposable Git worktree with test-first and implementation agents, gate every task with deterministic checks and independent verification before a central integrator applies it to a run-owned branch, checkpoint durable task state for resume, aggregate bugs into a re-runnable fix plan, and open a human-reviewed pull request. Requires a Git repository with usable worktrees.",
     "developerName": "MisterVitoPro",
     "category": "Developer Tools",
     "capabilities": [

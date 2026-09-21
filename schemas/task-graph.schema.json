@@ -14,7 +14,8 @@
       "items": {"$ref": "#/$defs/task"}
     },
     "uncovered_plan_sections": {"type": "array", "items": {"type": "string"}},
-    "token_usage": {"$ref": "#/$defs/tokenUsage"}
+    "token_usage": {"$ref": "#/$defs/tokenUsage"},
+    "served_model": {"type": ["string", "null"], "minLength": 1, "description": "The analyzer self-report of which model served it; null when it could not tell. Added 3.0.0, when the task graph became the whole analyzer return."}
   },
   "$defs": {
     "task": {
@@ -33,7 +34,10 @@
         "tests_to_satisfy": {"type": "array", "items": {"type": "string"}},
         "verification_scope": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
         "risk": {"type": "string", "enum": ["low", "medium", "high"]},
-        "shared_files": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        "shared_files": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "inline_tests": {"type": "boolean", "description": "Test-author tasks only: unit tests must live inside the implementation file (a target unreachable from an external test file), so this task may share exactly ONE file with its paired impl. Added 3.0.0 (moved from the removed wave-plan schema)."},
+        "non_testable_reason": {"type": "string", "description": "Standalone non-testable tasks: why no test gate applies."},
+        "complexity_signals": {"type": "array", "items": {"type": "string"}, "description": "Verbose mode only."}
       }
     },
     "tokenUsage": {

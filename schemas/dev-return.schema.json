@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["status", "files_written", "files_unexpectedly_modified", "context7_queries", "summary", "concerns"],
   "properties": {
-    "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+    "agent_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "description": "<task_id>-a<attempt> since 3.0.0. The pattern also admits the wave-N-agent-M ids the removed wave executor wrote."},
     "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "description": "Stable DAG task identifier. Optional for backwards-compatible wave returns; required by the DAG scheduler before it accepts a task return."},
     "task_worktree": {"type": "string", "minLength": 1, "description": "Absolute disposable DAG task-worktree path. Optional for legacy wave returns."},
     "task_base_commit": {"type": "string", "minLength": 1, "description": "Integration commit used to create the DAG task worktree. The scheduler uses it for stale-base checks."},

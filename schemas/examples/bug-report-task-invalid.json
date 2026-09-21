@@ -1,0 +1,39 @@
+{
+  "task_id": "task-001-draft-flow-impl",
+  "agent_id": "task-001-draft-flow-impl-a2",
+  "task_title": "Repair the draft flow",
+  "verifier_status": "BUGS_FOUND",
+  "base_commit": "4a1b2c3d",
+  "task_commit": "5b2c3d4e",
+  "bugs": [
+    {
+      "bug_id": "bug one",
+      "severity": "P2",
+      "category": "incorrect_implementation",
+      "title": "Error message omits the offending field name",
+      "file": "crates/native/src/api.rs",
+      "line": 237,
+      "evidence": "return Err(ApiError::Invalid)",
+      "expected": "Errors name the invalid field",
+      "suggested_fix": "Carry the field name in ApiError::Invalid"
+    }
+  ],
+  "verification_scope": [
+    "tests/draft.rs"
+  ],
+  "ownership_evidence": {
+    "status": "PASS",
+    "artifact_path": "ownership/task-001-draft-flow-impl-a2.txt",
+    "changed_paths": [
+      {
+        "path": "crates/native/src/api.rs",
+        "change_type": "modified",
+        "declared": true
+      }
+    ]
+  },
+  "deterministic_checks": {
+    "status": "PASS",
+    "artifact_path": "gates/task-001-draft-flow-impl-a2-green-1.log"
+  }
+}

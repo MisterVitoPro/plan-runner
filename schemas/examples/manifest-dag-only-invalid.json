@@ -1,0 +1,175 @@
+{
+  "cycle": 1,
+  "input_plan": "docs/foo/plan.md",
+  "started_at": "2026-09-20T00:00:00Z",
+  "completed_at": "2026-09-20T00:40:00Z",
+  "context7_available": false,
+  "git_available": true,
+  "backend": "subagent",
+  "docs_base": "docs",
+  "role_delivery": "inline",
+  "task_execution_seconds": 1840,
+  "total_bugs": 2,
+  "token_usage": {
+    "by_agent": [
+      {
+        "agent": "analyzer",
+        "phase": "analyze",
+        "input": 12345,
+        "output": 2345,
+        "total": 14690,
+        "source": "harness"
+      },
+      {
+        "agent": "task-001-draft-flow-impl-a1",
+        "phase": "dev",
+        "input": null,
+        "output": null,
+        "total": null
+      },
+      {
+        "agent": "task-001-draft-flow-impl-a2",
+        "phase": "task",
+        "input": null,
+        "output": null,
+        "total": 88410,
+        "source": "self_report"
+      },
+      {
+        "agent": "task-001-draft-flow-impl-a2-verifier",
+        "phase": "verify",
+        "input": 9000,
+        "output": 1200,
+        "total": 10200,
+        "source": "harness"
+      },
+      {
+        "agent": "task-001-draft-flow-impl-integrator",
+        "phase": "integrate",
+        "input": null,
+        "output": null,
+        "total": null
+      }
+    ],
+    "total_tokens": 113300,
+    "agents_reported": 3,
+    "agents_total": 5,
+    "complete": false
+  },
+  "dag": {
+    "mode": "dag",
+    "base_ref": "4a1b2c3d",
+    "integration_branch": "plan-runner/2026-09-20/cycle-1",
+    "branch_owned": true,
+    "events_path": "docs/plan-runner/2026-09-20/cycle-1/events.jsonl",
+    "stop_reason": null,
+    "worktree": {
+      "setup": "npm ci --prefer-offline",
+      "share": "auto"
+    },
+    "final_verification": {
+      "status": "passed",
+      "artifacts": [
+        "gates/final-suite.log"
+      ],
+      "completed_at": "2026-09-20T00:39:00Z"
+    },
+    "tasks": [
+      {
+        "task_id": "task-001-draft-flow-impl",
+        "required": true,
+        "depends_on": [
+          "task-001-draft-flow-test"
+        ],
+        "status": "integrated",
+        "attempts": 2,
+        "base_commit": "4a1b2c3d",
+        "produced_commit": "5b2c3d4e",
+        "integrated_commit": "6c3d4e5f",
+        "verification_artifacts": [
+          "bugs/task-001-draft-flow-impl.json",
+          "ownership/task-001-draft-flow-impl-a2.txt",
+          "gates/task-001-draft-flow-impl-a2-green-1.log"
+        ],
+        "retry_evidence": [
+          "evt-0007"
+        ],
+        "block_reason": null,
+        "lifecycle_event_ids": [
+          "evt-0004",
+          "evt-0007",
+          "evt-0011"
+        ],
+        "agent_source": "bundled",
+        "dispatch_mechanism": "host_subagent",
+        "resolved_model": "sonnet",
+        "model_substituted": null,
+        "bug_count": 1,
+        "duration_seconds": 412,
+        "tokens": {
+          "input": null,
+          "output": null,
+          "total": 88410,
+          "source": "self_report"
+        }
+      },
+      {
+        "task_id": "task-002-results-view",
+        "required": true,
+        "depends_on": [
+          "task-009-never-ran"
+        ],
+        "status": "blocked",
+        "attempts": 0,
+        "base_commit": "4a1b2c3d",
+        "produced_commit": null,
+        "integrated_commit": null,
+        "verification_artifacts": [],
+        "retry_evidence": [],
+        "block_reason": "blocked dependency: task-009-never-ran",
+        "lifecycle_event_ids": [
+          "evt-0015"
+        ],
+        "bug_count": 1,
+        "duration_seconds": null,
+        "tokens": null
+      }
+    ]
+  },
+  "tdd": {
+    "enabled": true,
+    "test_command": {
+      "full": "cargo test",
+      "single_file": "cargo test {mod}"
+    },
+    "baseline_failing": [],
+    "baseline_state": "build_failed",
+    "baseline_suite_seconds": 212,
+    "gates": {
+      "targeted_timeout_minutes": 10,
+      "suite_timeout_minutes": 30
+    },
+    "tasks": [
+      {
+        "task": "Repair the draft flow",
+        "test_files": [
+          "tests/draft.rs"
+        ],
+        "red_run": {
+          "cmd": "cargo test draft",
+          "exit": 124,
+          "result": "TIMEOUT",
+          "valid_red": null,
+          "log": "gates/task-001-draft-flow-test-a1-red-1.log"
+        },
+        "green_run": {
+          "cmd": "cargo test draft",
+          "exit": 0,
+          "result": "PASSED",
+          "valid_green": true,
+          "log": "gates/task-001-draft-flow-impl-a2-green-1.log"
+        }
+      }
+    ]
+  }
+}

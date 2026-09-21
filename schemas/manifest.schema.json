@@ -3,7 +3,7 @@
   "$id": "manifest.schema.json",
   "title": "Pipeline Manifest",
   "type": "object",
-  "required": ["cycle", "input_plan", "started_at", "context7_available", "waves", "total_bugs"],
+  "required": ["cycle", "input_plan", "started_at", "context7_available", "total_bugs"],
   "properties": {
     "cycle": {"type": "integer", "minimum": 1},
     "input_plan": {"type": "string"},
@@ -26,7 +26,7 @@
     },
     "dag": {
       "type": "object",
-      "description": "Additive task-DAG delivery evidence. It is present only for DAG runs; legacy wave/phase manifests omit it and remain valid.",
+      "description": "Task-DAG delivery evidence. Every manifest written since 3.0.0 carries it (the task DAG is the only executor); manifests written by the removed wave executor omit it and still validate.",
       "required": ["mode", "base_ref", "integration_branch", "branch_owned", "events_path", "final_verification", "tasks"],
       "properties": {
         "mode": {"type": "string", "const": "dag"},
@@ -35,6 +35,14 @@
         "branch_owned": {"type": "boolean", "const": true, "description": "Proves that integration_branch belongs to this run rather than to the operator."},
         "events_path": {"type": "string", "minLength": 1, "description": "Path to the append-only task lifecycle event stream."},
         "stop_reason": {"type": ["string", "null"], "description": "Durable reason for the most recent DAG checkpoint or stop, when any."},
+        "worktree": {
+          "type": "object",
+          "description": "The RESOLVED worktree bootstrap, written at pre-flight so every scheduler session bootstraps worktrees identically. Optional -- manifests written before 3.0.0 (pre-3.0.0) omit it.",
+          "properties": {
+            "setup": {"type": "string", "description": "Command run once in every new worktree before any gate; empty when none."},
+            "share": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true, "description": "Resolved untracked directories linked from the operator checkout into every worktree; never the unresolved 'auto'."}
+          }
+        },
         "final_verification": {
           "type": "object",
           "description": "Final dependency-frontier/PR-boundary verification evidence. A DAG PR is eligible only when this status is passed.",
@@ -64,7 +72,13 @@
               "retry_evidence": {"type": "array", "items": {"type": "string"}, "description": "Evidence paths or event ids for the bounded retry, empty when no retry occurred."},
               "block_reason": {"type": ["string", "null"]},
               "lifecycle_event_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "References into the append-only lifecycle event stream."},
-              "tokens": {"$ref": "#/$defs/tokenCount", "description": "Best-effort task-worker token evidence. null is retained when no usage was surfaced; never fabricate a value."}
+              "tokens": {"$ref": "#/$defs/tokenCount", "description": "Best-effort task-worker token evidence. null is retained when no usage was surfaced; never fabricate a value."},
+              "agent_source": {"type": "string", "description": "'bundled' or 'project:<name>': the definition that served the dev dispatch. Optional -- pre-3.0.0 DAG manifests omit it."},
+              "dispatch_mechanism": {"type": "string", "enum": ["host_subagent", "endpoint"], "description": "Which process made the dev dispatch. Optional -- pre-3.0.0 DAG manifests omit it."},
+              "resolved_model": {"type": ["string", "null"], "description": "Model the dev dispatch resolved to. Optional -- pre-3.0.0 DAG manifests omit it."},
+              "model_substituted": {"type": ["object", "null"], "description": "{configured, dispatched, reason} when a substitution occurred, else null. Optional -- pre-3.0.0 DAG manifests omit it."},
+              "bug_count": {"type": "integer", "minimum": 0, "description": "Findings in the current bug report for this task. Optional -- pre-3.0.0 DAG manifests omit it."},
+              "duration_seconds": {"type": ["integer", "null"], "minimum": 0, "description": "First dispatch through terminal state. Optional -- pre-3.0.0 DAG manifests omit it."}
             },
             "allOf": [
               {
@@ -144,11 +158,11 @@
             "required": ["agent", "phase"],
             "properties": {
               "agent": {"type": "string", "description": "Subagent label, e.g. 'analyzer', 'wave-2-agent-3', 'wave-2-verifier', 'aggregator'."},
-              "phase": {"type": "string", "enum": ["analyze", "wave", "verify", "aggregate"]},
+              "phase": {"type": "string", "enum": ["analyze", "wave", "task", "verify", "integrate", "aggregate"], "description": "task (dev and test-author dispatches) and integrate were added in 3.0.0; wave appears only in manifests written by the removed wave executor."},
               "input": {"type": ["integer", "null"]},
               "output": {"type": ["integer", "null"]},
               "total": {"type": ["integer", "null"]},
-              "source": {"type": "string", "enum": ["harness", "self_report"], "description": "Where the figure came from: 'harness' = the completion result's usage summary (authoritative); 'self_report' = the agent's own token_usage return field (a lower bound). Absent when tokens are null, and on manifests written before 1.11.0 (absent = harness)."}
+              "source": {"type": "string", "enum": ["harness", "self_report", "http_usage"], "description": "Where the figure came from: 'harness' = the completion result's usage summary (authoritative); 'self_report' = the agent's own token_usage return field (a lower bound). Absent when tokens are null, and on manifests written before 1.11.0 (absent = harness)."}
             }
           }
         },
@@ -169,6 +183,8 @@
       },
       "required": ["ran", "reason"]
     },
+    "task_execution_seconds": {"type": ["integer", "null"], "minimum": 0, "description": "Scheduler time summed across every scheduler session of the cycle. Optional -- manifests older than 3.0.0 (pre-3.0.0) omit it."},
+    "role_delivery": {"type": "string", "enum": ["path", "inline"], "description": "How bundled role definitions reach subagents this cycle. 'inline' is recorded when a subagent reported it could not read the role file, so later phase runners and resumed sessions start inline. Absent means 'path'. Optional -- manifests written before by-reference delivery (pre-3.0.0) omit it."},
     "tdd": {
       "type": "object",
       "required": ["enabled"],
@@ -182,6 +198,16 @@
           }
         },
         "baseline_failing": {"type": "array", "items": {"type": "string"}, "description": "Pre-existing failing tests at pre-flight; subtracted when attributing new failures."},
+        "baseline_state": {"type": "string", "enum": ["green", "red", "build_failed", "timeout"], "description": "How the pre-flight baseline suite run ended. build_failed and timeout mean the suite did not run, so an empty baseline_failing is NOT evidence of a green suite. Optional -- manifests written before gate discipline (pre-3.0.0) omit it."},
+        "baseline_suite_seconds": {"type": ["integer", "null"], "minimum": 0, "description": "Wall-clock of the baseline full-suite run. Optional -- manifests older than 3.0.0 (pre-3.0.0) omit it."},
+        "gates": {
+          "type": "object",
+          "description": "The RESOLVED gate budgets for this cycle, written at pre-flight so a relay phase runner or a resumed session applies the same budgets. Optional -- manifests older than 3.0.0 (pre-3.0.0) omit it.",
+          "properties": {
+            "targeted_timeout_minutes": {"type": "integer", "minimum": 1},
+            "suite_timeout_minutes": {"type": "integer", "minimum": 1}
+          }
+        },
         "tasks": {
           "type": "array",
           "items": {
@@ -195,8 +221,9 @@
                 "properties": {
                   "cmd": {"type": "string"},
                   "exit": {"type": "integer"},
-                  "result": {"type": "string"},
-                  "valid_red": {"type": "boolean"}
+                  "result": {"type": "string", "description": "FAILED | PASSED | TIMEOUT. TIMEOUT (since 3.0.0) means the gate exhausted its budget and was killed: evidence that it did not finish, never a pass."},
+                  "valid_red": {"type": ["boolean", "null"], "description": "null until the red-gate verifier judges the failure (and on a TIMEOUT); the orchestrator alone cannot tell a genuine red from a syntax or collection error."},
+                  "log": {"type": "string", "description": "Path of the file-backed gate log the verifier reads. Optional -- manifests older than 3.0.0 (pre-3.0.0) omit it."}
                 }
               },
               "green_run": {
@@ -204,7 +231,8 @@
                 "properties": {
                   "cmd": {"type": "string"},
                   "exit": {"type": "integer"},
-                  "result": {"type": "string", "description": "PASSED | FAILED | INVALID. INVALID (since the invalid-green rule) means the run executed zero tests -- an exit-0 pass that ran nothing is never recorded PASSED."},
+                  "result": {"type": "string", "description": "PASSED | FAILED | INVALID | TIMEOUT. INVALID (since the invalid-green rule) means the run executed zero tests -- an exit-0 pass that ran nothing is never recorded PASSED. TIMEOUT (since 3.0.0) means the gate exhausted its budget and was killed."},
+                  "log": {"type": "string", "description": "Path of the file-backed gate log the verifier reads. Optional -- manifests older than 3.0.0 (pre-3.0.0) omit it."},
                   "valid_green": {"type": ["boolean", "null"], "description": "False when the green gate ran zero tests (result INVALID); null when the runner's test count could not be parsed and the verifier judges the raw output instead. Optional -- manifests written before the invalid-green rule (pre-1.18.0) omit it."}
                 }
               }

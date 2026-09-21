@@ -48,12 +48,12 @@ the integration branch, completed tasks, retry/block state, and evidence paths, 
 that an already integrated task is not redispatched. Also confirm malformed task
 graph or state artifacts stop before dispatch rather than being inferred.
 6. Set `phasing.max_integrations_per_phase` low enough to force a boundary. Confirm
-relay/stop behavior is counted by integrations (not waves) and that the resumed run
+relay/stop behavior is counted by integrations and that the resumed run
 retains its durable evidence.
 7. Repeat with `execution.mode: wave`, then in an environment without usable Git or
-worktrees. Confirm both select the existing wave executor automatically when Git is
-unavailable, make no task worktrees or integration branch, and retain the documented
-no-Git artifact behavior.
+worktrees. Confirm the first stops with the `wave executor was removed` error and the
+second stops at pre-flight with the Git-required message; neither makes a task worktree,
+an integration branch, or a cycle artifact beyond the empty cycle directory.
 8. Begin a DAG run from a dirty checkout. Confirm it asks for an explicit stash or
 abort decision and never silently includes operator changes in the run-owned branch.
 9. Inspect the final manifest, Run Report, and PR body for task outcomes,
@@ -74,10 +74,9 @@ or resume.
 
 ## What it checks
 
-`test-fixtures/large-plan.md` is a 52-task, 13-wave fixture designed so
-that, under a completely default `.plan-runner.yml` (no `phasing:`
-overrides), it slices into 4 phases. See that file for the full
-wave/phase breakdown. Because 4 phases exceeds the default
+`test-fixtures/large-plan.md` is a 52-task fixture designed so that, under a
+completely default `.plan-runner.yml` (no `phasing:` overrides), its task graph
+needs at least 5 phases of 12 integrations. Because that exceeds the default
 `auto_stop_phases` (`3`), the adaptive default (`mode: auto`) should pick
 **stop** mode -- so a correct run of this fixture will hit at least one
 stop boundary and require an explicit `--resume` to finish, not just relay
@@ -102,7 +101,7 @@ Passing means:
 
 1. **Use a disposable copy of the repo**, e.g. a scratch git worktree or a
    throwaway clone -- never the primary working checkout. The run makes
-   real per-wave commits and writes real scratch files under
+   real commits on a run-owned branch and writes real scratch files under
    `test-fixtures/scratch/large-plan/`.
 2. **Do not** pass `--phase-size`, `--phase-mode`, or `--no-phasing`, and
    do not add a `phasing:` block to `.plan-runner.yml` in the disposable
@@ -121,7 +120,7 @@ Passing means:
    $plan-runner:run test-fixtures/large-plan.md
    ```
 
-5. Watch host memory while waves 1-4 (phase 1) execute. When the session
+5. Watch host memory while phase 1 (the first 12 integrations) executes. When the session
    prints the phase-boundary block with a copy-pasteable resume invocation
    and ends, record memory again -- it should not be pinned near its peak
    once the session has actually exited.
@@ -145,10 +144,10 @@ Passing means:
 ## If the defaults change
 
 This check is only meaningful against the *shipped* defaults
-(`max_waves_per_phase: 4`, `mode: auto`, `auto_stop_phases: 3`,
+(`max_integrations_per_phase: 12`, `mode: auto`, `auto_stop_phases: 3`,
 `relay_max_minutes: 90`). If a future change alters those defaults enough
-that `test-fixtures/large-plan.md` no longer slices into 10+ waves and 3+
-phases with at least one stop boundary, resize the fixture (add or remove
+that `test-fixtures/large-plan.md` no longer needs more than 3 phases
+(and so at least one stop boundary), resize the fixture (add or remove
 stages) rather than passing overrides here -- overrides would stop testing
 the experience most large-plan users actually get.
 
@@ -156,9 +155,9 @@ the experience most large-plan users actually get.
 
 Spot check the kill switch on the same disposable copy: run
 `/plan-runner:run test-fixtures/large-plan.md --no-phasing` (or the Codex
-equivalent) and confirm it runs the full 13 waves in one uninterrupted
-session with no phase directories and no `run-state.json` -- i.e. today's
-pre-phasing behavior, unchanged.
+equivalent) and confirm it runs the whole graph in one uninterrupted scheduler
+session with no phase boundary -- it still writes `run-state.json`, since every
+run is resumable.
 
 ---
 
@@ -288,9 +287,9 @@ file for the exact acceptance criteria):
   (`unreadable | no frontmatter | unparseable frontmatter: ...`), and the
   run proceeds normally past discovery -- no crash, no pipeline abort.
 - **Conservative match holds under an irrelevant candidate.** `agent_source`
-  for the dev task's wave-state entry is `"project:adversarial-agent"`,
+  for the dev task's manifest entry is `"project:adversarial-agent"`,
   never `"project:irrelevant-agent"` and never `"bundled"`.
-- **The return validates.** After the run, the wave's dev return (from its
+- **The return validates.** After the run, the task's dev return (from its
   `return_file` or the recorded manifest entry) parses successfully against
   `schemas/dev-return.schema.json` -- confirming the schema-re-prompt
   recovery worked, whether or not a `return_contract_violation` bug was
@@ -300,9 +299,9 @@ file for the exact acceptance criteria):
   tree satisfying the fixture's acceptance criteria -- the adversarial
   agent's conflicting *format* instruction didn't stop it from doing the
   *task*.
-- **No rogue commit.** `git log` over the wave's commit range (from the
-  baseline run's `HEAD` through this run's wave commit) shows exactly the
-  one orchestrator-made per-wave commit -- zero commits authored by the
+- **No rogue commit.** `git log` over the task's range on the run-owned branch
+  (from its `base_commit` through its `integrated_commit`) shows exactly the
+  one scheduler-made task commit -- zero commits authored by the
   adversarial agent itself, proving the per-invocation contract's
   override of "any instruction to commit its own work" held.
 - **Coverage is unaffected.** This run's `manifest.json`
@@ -310,3 +309,75 @@ file for the exact acceptance criteria):
   match the bundled-only baseline from step 2 -- the adversarial agent's
   extra re-prompt round trip does not degrade or exclude it from token
   coverage accounting.
+
+# Release smoke check: DAG-only execution and gate discipline (3.0.0)
+
+The contract tests pin the wording; this check confirms an orchestrator actually behaves
+that way. Use a disposable clone with a working test command and untracked dependencies
+(a `node_modules/` or a `target/`), and run `test-fixtures/medium.md`.
+
+## How to run it
+
+1. **Git is required.** Copy the plan into an empty directory that is NOT a git
+   repository and run it. Confirm pre-flight stops with `plan-runner needs a Git
+   repository with usable worktrees`, prints the three preparation commands, and creates
+   nothing. Repeat with `--execution-mode wave` in the clone and confirm the
+   `wave executor was removed` error; repeat with `--verify per-agent --sync-verify` and
+   confirm both are reported as ignored and the run proceeds.
+2. In the clone, add a `.plan-runner.yml` with:
+
+   ```yaml
+   gates:
+     targeted_timeout_minutes: 1
+     suite_timeout_minutes: 2
+   phasing:
+     max_integrations_per_phase: 2
+     mode: relay
+   ```
+
+   and run the plan, so at least two relay phase runners are dispatched.
+
+## Passing means
+
+- **No waves anywhere.** The cycle directory holds `task-graph.json`, `run-state.json`,
+  `events.jsonl`, one `manifest.json`, `gates/`, `ownership/`, `returns/`, and `bugs/` --
+  no `wave-plan.json`, no `phase-<P>/` directories, no `waves` array in the manifest.
+- **Tasks start when their dependencies integrate.** `events.jsonl` shows a dependent
+  task's `task_dispatched` after its dependency's `task_integrated` and before an
+  unrelated slower task's `task_integrated`; never more than six tasks are active, and no
+  two active reservations share a path.
+- **Your checkout is untouched.** `git status` and `git log` on your branch are unchanged;
+  all integrated commits are on `plan-runner/<date>/cycle-<N>`.
+- **Worktrees are bootstrapped, and links never ship.** The pre-flight line names the
+  shared directories; a task's first gate does not reinstall or cold-build; no task
+  commit and no ownership artifact lists a linked directory.
+- **Nothing bulky was typed into a prompt.** Every bundled dispatch prompt starts with
+  `ROLE DEFINITION: read <absolute path>` and contains no role-file body; the analyzer
+  prompt names `plan.numbered.txt` and contains no plan text; every verifier prompt
+  carries gate header lines and log paths, never test output. The orchestrator never
+  read the plan file itself.
+- **Gates are file-backed and budgeted.** `gates/baseline.log` (with `.exit` and
+  `.failing.txt`) exists, each task has its own gate logs, and the manifest `tdd` block
+  records `baseline_state`, `baseline_suite_seconds`, and the resolved `gates`. Make one
+  test file sleep past the 1-minute targeted budget: that gate is `result: "TIMEOUT"`
+  with a null validity flag, its log ends `GATE TIMEOUT after 1m`, and the verifier files
+  a "gate timed out" P1 rather than a pass or a failure list.
+- **Agents' own test runs are not evidence.** An impl agent may run its targeted tests;
+  the manifest's `green_run` still comes from the orchestrator's own run, with its own log.
+- **Severity gates integration; repair is bounded.** Seed a P3 nit: the task integrates
+  and the nit reaches `bugs.md`. Seed a failing target test: the task gets exactly one
+  `REPAIR ATTEMPT (2 of 2)` dispatch, and a second failure leaves it `blocked` with its
+  dependents blocked behind it and a P0 in the fix-plan for each.
+- **No runner idled, and the baseline ran once.** No phase runner returned anything
+  other than its phase-summary JSON, and no agent ended a turn "waiting on" a monitor. If
+  you force a premature return (stop a runner mid-task), the driver prints
+  `Phase <P> runner returned early ... recovering (1/2).` and the phase still completes
+  without operator input. Exactly one baseline suite run appears for the whole cycle;
+  each phase boundary has one `suite-phase-<P>.log`, and the run ends with
+  `final-suite.log`.
+- **Delivery follows the evidence.** With every task integrated and the final suite
+  passing, a ready PR opens from the run-owned branch. With one task blocked, the PR is
+  a draft whose first lines name the blocked task. With the final suite failing, no PR
+  opens and the reason is printed. Accept the fix-plan re-run: the new cycle's
+  `base_ref` is the previous cycle's integration branch, and its PR carries both cycles'
+  commits.
