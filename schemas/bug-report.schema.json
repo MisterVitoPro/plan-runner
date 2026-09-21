@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["verifier_status", "bugs"],
   "properties": {
-    "agent_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+$"},
+    "agent_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "description": "<task_id>-a<attempt> since 3.0.0. The pattern also admits the wave-N-agent-M ids the removed wave executor wrote."},
     "task_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$", "description": "Stable DAG task identifier. Optional for backwards-compatible wave verifier reports; required by DAG task verification."},
     "task_title": {"type": "string"},
     "verifier_status": {"type": "string", "enum": ["CLEAN", "BUGS_FOUND", "UNVERIFIABLE"]},
@@ -20,9 +20,9 @@
         "type": "object",
         "required": ["bug_id", "severity", "category", "title", "file", "evidence", "expected", "suggested_fix"],
         "properties": {
-          "bug_id": {"type": "string", "pattern": "^wave-[0-9]+-agent-[0-9]+-bug-[0-9]+$"},
+          "bug_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*-bug-[0-9]+$", "description": "<task_id>-bug-<N> since 3.0.0; also admits the pre-3.0.0 wave-N-agent-M-bug-K form."},
           "severity": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
-          "category": {"type": "string", "enum": ["missing_requirement", "incorrect_implementation", "scope_drift", "broken_existing"]},
+          "category": {"type": "string", "enum": ["missing_requirement", "incorrect_implementation", "scope_drift", "broken_existing", "return_contract_violation"]},
           "title": {"type": "string", "maxLength": 500, "description": "Pre-1.13.0 artifacts uncapped. One-line bug summary."},
           "file": {"type": "string"},
           "line": {"type": ["integer", "null"]},

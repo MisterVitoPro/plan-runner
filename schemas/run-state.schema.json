@@ -4,7 +4,7 @@
   "title": "Run State Checkpoint",
   "description": "Durable checkpoint for phased plan-runner executions. Records plan metadata, invocation context, phase list with per-phase status and directory, and overall run status for resumability and crash recovery.",
   "type": "object",
-  "required": ["plan_path", "plan_content_hash", "invocation_flags", "backend", "verify_mode", "tdd_enabled", "phases", "overall_status", "updated_at"],
+  "required": ["plan_path", "plan_content_hash", "invocation_flags", "backend", "tdd_enabled", "overall_status", "updated_at"],
   "properties": {
     "plan_path": {
       "type": "string",

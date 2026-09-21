@@ -1,8 +1,8 @@
 {
   "name": "plan-runner",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Claude Code and Codex plugin: run a Markdown implementation plan through a parallel agent swarm with per-wave verification.",
+  "description": "Claude Code and Codex plugin: run a Markdown implementation plan as a dependency-ready task DAG with per-task verification.",
   "author": "MisterVitoPro",
   "license": "MIT",
   "scripts": {

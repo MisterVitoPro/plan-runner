@@ -14,17 +14,19 @@ SCHEMAS_DIR = ROOT / "schemas"
 EXAMPLES_DIR = SCHEMAS_DIR / "examples"
 
 CASES = [
-    ("wave-plan.schema.json", "wave-plan-valid.json", "wave-plan-invalid.json"),
     ("dev-return.schema.json", "dev-return-valid.json", "dev-return-invalid.json"),
     ("manifest.schema.json", "manifest-valid.json", "manifest-invalid.json"),
     ("manifest.schema.json", "manifest-model-policy-valid.json", "manifest-model-policy-invalid.json"),
     ("manifest.schema.json", "manifest-agent-source-valid.json", "manifest-agent-source-invalid.json"),
     ("manifest.schema.json", "manifest-http-usage-valid.json", "manifest-http-usage-invalid.json"),
+    ("manifest.schema.json", "manifest-dag-only-valid.json", "manifest-dag-only-invalid.json"),
     ("run-state.schema.json", "run-state.valid.json", "run-state.invalid.json"),
     ("run-state.schema.json", "run-state-model-policy-valid.json", "run-state-model-policy-invalid.json"),
     ("run-state.schema.json", "run-state-model-policy-subst-valid.json", "run-state-model-policy-subst-invalid.json"),
     ("run-state.schema.json", "run-state-endpoint-dispatch-valid.json", "run-state-endpoint-dispatch-invalid.json"),
+    ("run-state.schema.json", "run-state-dag-only-valid.json", "run-state-dag-only-invalid.json"),
     ("bug-report.schema.json", "bug-report-valid.json", "bug-report-invalid.json"),
+    ("bug-report.schema.json", "bug-report-task-valid.json", "bug-report-task-invalid.json"),
     ("task-graph.schema.json", "task-graph-valid.json", "task-graph-invalid.json"),
     ("task-event.schema.json", "task-event-valid.json", "task-event-invalid.json"),
 ]
